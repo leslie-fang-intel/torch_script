@@ -31,8 +31,8 @@ if __name__ == "__main__":
     best_cost = sys.maxsize
     while search_times > 0:
         config, status = heuristic_annotator(graph_module, config=copy.deepcopy(config))
-        start_node_idx = config["start_node_index"]
-        end_node_idx = config["end_node_index"]
+        start_node_idx = config["cur_start_index"]
+        end_node_idx = config["cur_end_index"]
 
         # **TODO** opentuner parameters
         loop_times = config["loop_times"]
