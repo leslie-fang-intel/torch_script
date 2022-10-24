@@ -166,6 +166,7 @@ if __name__ == "__main__":
             best_config["loop_times"] = best_cfg['loop_times']
             best_config["mini_bs"] = best_cfg['batchsize_uniform']
             best_config["stream_number"] = best_cfg['stream_number']
+            print("Update best config to: {0}. best_throughput: {1}".format(best_config, best_throughput), flush=True)
 
         search_times -= 1
     print("Final best config is: {0}. best_throughput: {1}".format(best_config, best_throughput), flush=True)
