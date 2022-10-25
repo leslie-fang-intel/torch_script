@@ -1,7 +1,7 @@
 import torch
 import torchvision.models as models
 import intel_extension_for_pytorch as ipex
-from intel_extension_for_pytorch.fx.xpu_auto_shard import mixed_affinity_tuner
+from intel_extension_for_pytorch.fx.xpu_auto_shard import mixed_affinity_tuner, MixedAffinityTunerConfig
 import copy
 import time
 import sys
@@ -21,7 +21,8 @@ profile = False
 if __name__ == "__main__":
     module = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
     x = torch.randn(1, 3, 224, 224).contiguous(memory_format=torch.channels_last).to(torch.bfloat16)
-    best_performance_model = mixed_affinity_tuner(module, x, dtype=torch.bfloat16, search_time=600.0)
+    mixed_affinity_tuner_config = MixedAffinityTunerConfig(search_time = 60.0)
+    best_performance_model = mixed_affinity_tuner(module, x, dtype=torch.bfloat16, mixed_affinity_tuner_config=mixed_affinity_tuner_config)
     
     stream_number = best_performance_model.stream_number
     loop_times = best_performance_model.loop_times
