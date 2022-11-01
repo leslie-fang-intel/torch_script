@@ -13,17 +13,18 @@ USE_XPU = True
 CUDA_TASK = True
 
 def measurement_performance():
-    x = torch.randn(1000, 3, 224, 224).contiguous(memory_format=torch.channels_last)
-    model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
-
     bs_cpu = 14
     bs_gpu = 60
+    global_bs = bs_cpu + bs_gpu
+    x = torch.randn(global_bs, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+    model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
+
     x_cpu = x[0:bs_cpu]
     # **TODO** copy.deepcopy may fail for some models
     model_cpu = copy.deepcopy(model)
 
     if USE_CUDA:
-        x_gpu = x[bs_cpu:bs_gpu].to(device="cuda")
+        x_gpu = x[bs_cpu:global_bs].to(device="cuda")
         model_gpu = model.to(device="cuda")
         if CUDA_TASK:
             cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[0,])
