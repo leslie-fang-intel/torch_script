@@ -112,9 +112,12 @@ def measurement_xpu_performance():
             if (CUDA_ONLY or USE_XPU) and ASYNC_TASK:
                 res_gpu = res_gpu.get()
                 #pass
+            res_gpu_cpu = res_gpu.to(device="cpu")
+            res = torch.cat((res_cpu, res_gpu_cpu))
         time_cost = (time.time() - start)
 
         print("time_cost: {}".format(time_cost))
+        print("Time per iteration: {}".format(time_cost/iterations))
         if CUDA_ONLY:
             throughtput = bs_gpu * iterations / time_cost
         elif CPU_ONLY:
@@ -177,6 +180,7 @@ def measurement_performance_cpu(use_async_task=False, use_jit=False):
         time_cost = (time.time() - start)
 
         print("time_cost: {}".format(time_cost))
+        print("Time per iteration: {}".format(time_cost/iterations))
         throughtput = bs_cpu * iterations / time_cost
         print("throughtput: {}".format(throughtput))
         return
@@ -231,6 +235,7 @@ def measurement_performance_raw_cuda(use_async_task=False, use_jit=False):
         time_cost = (time.time() - start)
 
         print("time_cost: {}".format(time_cost))
+        print("Time per iteration: {}".format(time_cost/iterations))
         throughtput = bs_gpu * iterations / time_cost
         print("throughtput: {}".format(throughtput))
     return
