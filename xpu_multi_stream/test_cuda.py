@@ -42,8 +42,8 @@ def measurement_xpu_performance():
 
     if USE_JIT and (CPU_ONLY or USE_XPU):
         if ASYNC_TASK:
-            traced_cpu_pool = ipex.cpu.runtime.CPUPool([0])
             num_streams = cpu_computation_cores.__len__()
+            traced_cpu_pool = ipex.cpu.runtime.CPUPool(cpu_computation_cores[0:(cpu_computation_cores.__len__()//num_streams)])
             with torch.no_grad(), ipex.cpu.runtime.pin(traced_cpu_pool):
                 x_traced = x_cpu[0:(bs_cpu//num_streams)]
                 with torch.no_grad():
@@ -143,8 +143,8 @@ def measurement_performance_cpu(use_async_task=False, use_jit=False):
 
     if use_jit:
         if ASYNC_TASK:
-            traced_cpu_pool = ipex.cpu.runtime.CPUPool([0])
-            num_streams=cpu_computation_cores.__len__()
+            num_streams = cpu_computation_cores.__len__()
+            traced_cpu_pool = ipex.cpu.runtime.CPUPool(cpu_computation_cores[0:(cpu_computation_cores.__len__()//num_streams)])
             with torch.no_grad(), ipex.cpu.runtime.pin(traced_cpu_pool):
                 traced_X = x_cpu[0:(bs_cpu//num_streams)]
                 with torch.no_grad():
