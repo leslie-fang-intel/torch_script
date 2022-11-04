@@ -9,18 +9,18 @@ CUDA_ONLY = False
 CPU_ONLY = False
 USE_XPU = True
 
-ASYNC_TASK = False
-
+ASYNC_TASK = True
 USE_JIT = True
 
 if ASYNC_TASK or USE_JIT:
     import intel_extension_for_pytorch as ipex
 
 PROFILE = False
+
 warm_up_iterations = 20
-iterations = 100
+iterations = 50
 bs_cpu = 126
-bs_gpu = 256
+bs_gpu = 1536
 
 def measurement_xpu_performance():
     global bs_cpu
@@ -41,18 +41,23 @@ def measurement_xpu_performance():
     cpu_computation_cores = numa_node0_cores
 
     if USE_JIT and (CPU_ONLY or USE_XPU):
-        with torch.no_grad():
-            model_cpu = torch.jit.trace(model_cpu, x_cpu, check_trace=False).eval()
-        model_cpu = torch.jit.freeze(model_cpu)
         if ASYNC_TASK:
             traced_cpu_pool = ipex.cpu.runtime.CPUPool([0])
+            num_streams = cpu_computation_cores.__len__()
             with torch.no_grad(), ipex.cpu.runtime.pin(traced_cpu_pool):
+                x_traced = x_cpu[0:(bs_cpu//num_streams)]
+                with torch.no_grad():
+                    model_cpu = torch.jit.trace(model_cpu, x_traced, check_trace=False).eval()
+                model_cpu = torch.jit.freeze(model_cpu)
                 for _ in range(3):
-                    model_cpu(x_cpu)
+                    model_cpu(x_traced)
                 print("Finish CPU Jit Warmup", flush=True)
             cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=cpu_computation_cores)
-            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=cpu_computation_cores.__len__(), cpu_pool=cpu_pool)
+            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=num_streams, cpu_pool=cpu_pool)
         else:
+            with torch.no_grad():
+                model_cpu = torch.jit.trace(model_cpu, x_cpu, check_trace=False).eval()
+            model_cpu = torch.jit.freeze(model_cpu)
             with torch.no_grad():
                 for _ in range(3):
                     model_cpu(x_cpu)
@@ -133,19 +138,24 @@ def measurement_performance_cpu(use_async_task=False, use_jit=False):
 
     cpu_computation_cores = numa_node0_cores
 
-    if USE_JIT and (CPU_ONLY or USE_XPU):
-        with torch.no_grad():
-            model_cpu = torch.jit.trace(model_cpu, x_cpu, check_trace=False).eval()
-        model_cpu = torch.jit.freeze(model_cpu)
+    if use_jit:
         if ASYNC_TASK:
             traced_cpu_pool = ipex.cpu.runtime.CPUPool([0])
+            num_streams=cpu_computation_cores.__len__()
             with torch.no_grad(), ipex.cpu.runtime.pin(traced_cpu_pool):
+                traced_X = x_cpu[0:(bs_cpu//num_streams)]
+                with torch.no_grad():
+                    model_cpu = torch.jit.trace(model_cpu, traced_X, check_trace=False).eval()
+                model_cpu = torch.jit.freeze(model_cpu)
                 for _ in range(3):
-                    model_cpu(x_cpu)
-                print("Finish CPU Jit Warmup", flush=True)
+                    model_cpu(traced_X)
+                print("Finish Async CPU Jit Warmup", flush=True)
             cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=cpu_computation_cores)
-            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=cpu_computation_cores.__len__(), cpu_pool=cpu_pool)
+            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=num_streams, cpu_pool=cpu_pool)
         else:
+            with torch.no_grad():
+                model_cpu = torch.jit.trace(model_cpu, x_cpu, check_trace=False).eval()
+            model_cpu = torch.jit.freeze(model_cpu)
             with torch.no_grad():
                 for _ in range(3):
                     model_cpu(x_cpu)
