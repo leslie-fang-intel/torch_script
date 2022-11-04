@@ -5,9 +5,9 @@ import time
 import torch.fx.experimental.optimization as optimization
 import os
 
-CUDA_ONLY = True
+CUDA_ONLY = False
 CPU_ONLY = False
-USE_XPU = False
+USE_XPU = True
 
 ASYNC_TASK = False
 
@@ -17,10 +17,14 @@ if ASYNC_TASK or USE_JIT:
     import intel_extension_for_pytorch as ipex
 
 PROFILE = False
+warm_up_iterations = 20
+iterations = 100
+bs_cpu = 126
+bs_gpu = 256
 
-def measurement_performance():
-    bs_cpu = 46
-    bs_gpu = 128
+def measurement_xpu_performance():
+    global bs_cpu
+    global bs_gpu
     global_bs = bs_cpu + bs_gpu
     x = torch.randn(global_bs, 3, 224, 224).contiguous(memory_format=torch.channels_last)
     model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
@@ -28,6 +32,13 @@ def measurement_performance():
     x_cpu = x[0:bs_cpu]
     # **TODO** copy.deepcopy may fail for some models
     model_cpu = copy.deepcopy(model)
+
+    numa_node0_cores = ipex.cpu.runtime.get_core_list_of_node_id(0)
+    print("numa_node0_cores is: {}".format(numa_node0_cores))
+
+    cuda_thread_coreid = 0
+    numa_node0_cores.remove(cuda_thread_coreid)
+    cpu_computation_cores = numa_node0_cores
 
     if USE_JIT and (CPU_ONLY or USE_XPU):
         with torch.no_grad():
@@ -39,8 +50,8 @@ def measurement_performance():
                 for _ in range(3):
                     model_cpu(x_cpu)
                 print("Finish CPU Jit Warmup", flush=True)
-            cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
-            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=23, cpu_pool=cpu_pool)
+            cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=cpu_computation_cores)
+            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=cpu_computation_cores.__len__(), cpu_pool=cpu_pool)
         else:
             with torch.no_grad():
                 for _ in range(3):
@@ -61,17 +72,16 @@ def measurement_performance():
                 print("Finish GPU Jit Warmup", flush=True)
         ipex._C.enable_jit_opt()
         if ASYNC_TASK:
-            cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[0,])
+            cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[cuda_thread_coreid,])
             #cpu_pool = ipex.cpu.runtime.CPUPool(node_id=0)
             model_gpu = ipex.cpu.runtime.Task(model_gpu, cpu_pool)
             #pass
 
-    affinity_mask = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
-    pid = 0
+    affinity_mask = set(cpu_computation_cores)
     os.sched_setaffinity(0, affinity_mask)
-    main_thread_cpupool = ipex.cpu.runtime.CPUPool([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
+    main_thread_cpupool = ipex.cpu.runtime.CPUPool(cpu_computation_cores)
     with torch.no_grad(), ipex.cpu.runtime.pin(main_thread_cpupool):
-        warm_up_iterations = 20
+        global warm_up_iterations
         for i in range(warm_up_iterations):
             if CUDA_ONLY or USE_XPU:
                 res_gpu = model_gpu(x_gpu)
@@ -82,7 +92,7 @@ def measurement_performance():
                 #pass
         print("Finish the warm up", flush=True)
 
-        iterations = 100
+        global iterations
         start = time.time()
         for i in range(iterations):
             if CUDA_ONLY or USE_XPU:
@@ -109,23 +119,61 @@ def measurement_performance():
         print("throughtput: {}".format(throughtput))
         return
 
-def test_cuda_task():
-    x = torch.randn(1000, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+def measurement_performance_cpu(use_async_task=False, use_jit=False):
+    global bs_cpu
+    global_bs = bs_cpu
+    x = torch.randn(global_bs, 3, 224, 224).contiguous(memory_format=torch.channels_last)
     model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
-    x_gpu = x[14:28].to(device="cuda")
-    model_gpu = model.to(device="cuda")
-    # cpu_pool = ipex.cpu.runtime.CPUPool(node_id=0)
-    cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[0,])
-    task = ipex.cpu.runtime.Task(model_gpu, cpu_pool)
-    y_runtime_future = task(x_gpu)
-    y_runtime = y_runtime_future.get()
-    print(y_runtime)
 
-    y_res = model_gpu(x_gpu)
-    print(torch.allclose(y_res, y_runtime))
+    x_cpu = x
+    model_cpu = model
+
+    numa_node0_cores = ipex.cpu.runtime.get_core_list_of_node_id(0)
+    print("numa_node0_cores is: {}".format(numa_node0_cores))
+
+    cpu_computation_cores = numa_node0_cores
+
+    if USE_JIT and (CPU_ONLY or USE_XPU):
+        with torch.no_grad():
+            model_cpu = torch.jit.trace(model_cpu, x_cpu, check_trace=False).eval()
+        model_cpu = torch.jit.freeze(model_cpu)
+        if ASYNC_TASK:
+            traced_cpu_pool = ipex.cpu.runtime.CPUPool([0])
+            with torch.no_grad(), ipex.cpu.runtime.pin(traced_cpu_pool):
+                for _ in range(3):
+                    model_cpu(x_cpu)
+                print("Finish CPU Jit Warmup", flush=True)
+            cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=cpu_computation_cores)
+            model_cpu = ipex.cpu.runtime.MultiStreamModule(model_cpu, num_streams=cpu_computation_cores.__len__(), cpu_pool=cpu_pool)
+        else:
+            with torch.no_grad():
+                for _ in range(3):
+                    model_cpu(x_cpu)
+                print("Finish CPU Jit Warmup", flush=True)
+
+    affinity_mask = set(cpu_computation_cores)
+    os.sched_setaffinity(0, affinity_mask)
+    main_thread_cpupool = ipex.cpu.runtime.CPUPool(cpu_computation_cores)
+    with torch.no_grad(), ipex.cpu.runtime.pin(main_thread_cpupool):
+        global warm_up_iterations
+        for i in range(warm_up_iterations):
+            res_cpu = model_cpu(x_cpu)
+        print("Finish the warm up", flush=True)
+
+        global iterations
+        start = time.time()
+        for i in range(iterations):
+            res_cpu = model_cpu(x_cpu)
+        time_cost = (time.time() - start)
+
+        print("time_cost: {}".format(time_cost))
+        throughtput = bs_cpu * iterations / time_cost
+        print("throughtput: {}".format(throughtput))
+        return
+
 
 def measurement_performance_raw_cuda(use_async_task=False, use_jit=False):
-    bs_gpu = 128
+    global bs_gpu
     x = torch.randn(bs_gpu, 3, 224, 224).contiguous(memory_format=torch.channels_last)
     model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
 
@@ -149,9 +197,8 @@ def measurement_performance_raw_cuda(use_async_task=False, use_jit=False):
         cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[0,])
         model_gpu = ipex.cpu.runtime.Task(model_gpu, cpu_pool)
 
-
     with torch.no_grad():
-        warm_up_iterations = 20
+        global warm_up_iterations
         for i in range(warm_up_iterations):
             res_gpu = model_gpu(x_gpu)
             if use_async_task:
@@ -159,7 +206,7 @@ def measurement_performance_raw_cuda(use_async_task=False, use_jit=False):
             torch.cuda.synchronize(device="cuda")
         print("Finish the warm up")
 
-        iterations = 100
+        global iterations
         start = time.time()
         for i in range(iterations):
             if i == 20 and PROFILE:
@@ -178,11 +225,24 @@ def measurement_performance_raw_cuda(use_async_task=False, use_jit=False):
         print("throughtput: {}".format(throughtput))
     return
 
+def test_cuda_task_correctness():
+    x = torch.randn(1000, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+    model = models.__dict__["resnet50"]().to(memory_format=torch.channels_last).eval()
+    x_gpu = x[14:28].to(device="cuda")
+    model_gpu = model.to(device="cuda")
+    # cpu_pool = ipex.cpu.runtime.CPUPool(node_id=0)
+    cpu_pool = ipex.cpu.runtime.CPUPool(core_ids=[0,])
+    task = ipex.cpu.runtime.Task(model_gpu, cpu_pool)
+    y_runtime_future = task(x_gpu)
+    y_runtime = y_runtime_future.get()
+    print(y_runtime)
+
+    y_res = model_gpu(x_gpu)
+    print(torch.allclose(y_res, y_runtime))
 
 if __name__ == "__main__":
-    #measurement_performance()
+    #measurement_xpu_performance()
 
-    #test_cuda_task()
     if CUDA_ONLY:
         print("CUDA_ONLY:{}".format(CUDA_ONLY))
         if ASYNC_TASK and USE_JIT:
@@ -197,6 +257,21 @@ if __name__ == "__main__":
         else:
             print("ASYNC_TASK:{0}, USE_JIT:{1}".format(ASYNC_TASK, USE_JIT))
             measurement_performance_raw_cuda(False, False)
+    elif CPU_ONLY:
+        print("CPU_ONLY:{}".format(CPU_ONLY))
+        if ASYNC_TASK and USE_JIT:
+            print("ASYNC_TASK:{0}, USE_JIT:{1}".format(ASYNC_TASK, USE_JIT))
+            measurement_performance_cpu(True, True)
+        elif ASYNC_TASK:
+            print("ASYNC_TASK:{0}, USE_JIT:{1}".format(ASYNC_TASK, USE_JIT))
+            measurement_performance_cpu(True, False)
+        elif USE_JIT:
+            print("ASYNC_TASK:{0}, USE_JIT:{1}".format(ASYNC_TASK, USE_JIT))
+            measurement_performance_cpu(False, True)
+        else:
+            print("ASYNC_TASK:{0}, USE_JIT:{1}".format(ASYNC_TASK, USE_JIT))
+            measurement_performance_cpu(False, False)
     else:
-        measurement_performance()
+        measurement_xpu_performance()
 
+    # test_cuda_task_correctness()
