@@ -1,0 +1,64 @@
+Start new test case
+with_bias is: False
+sys_quant is: True
+fused_module_classes is: (<class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.Conv2dAdd'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearLeakyReLU'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearBn1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.BNReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.BNReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearReLU'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn3d'>)
+fused_module_classes is: (<class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.Conv2dAdd'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvReLU1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearLeakyReLU'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearBn1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.BNReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.BNReLU2d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn1d'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBnReLU3d'>, <class 'torch.ao.nn.intrinsic.modules.fused.LinearReLU'>, <class 'torch.ao.nn.intrinsic.modules.fused.ConvBn3d'>)
+model before lower_to_fbgemm is: GraphModule(
+  (conv1): QuantizedConv2d(Reference)(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+  (conv2): Conv2dAdd(
+    (0): QuantizedConv2d(Reference)(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+  )
+  (relu): ReLU()
+)
+
+
+
+def forward(self, x):
+    conv1_input_scale_0 = self.conv1_input_scale_0
+    conv1_input_zero_point_0 = self.conv1_input_zero_point_0
+    quantize_per_tensor = torch.quantize_per_tensor(x, conv1_input_scale_0, conv1_input_zero_point_0, torch.quint8);  x = conv1_input_scale_0 = conv1_input_zero_point_0 = None
+    dequantize = quantize_per_tensor.dequantize();  quantize_per_tensor = None
+    conv1 = self.conv1(dequantize)
+    conv1_scale_0 = self.conv1_scale_0
+    conv1_zero_point_0 = self.conv1_zero_point_0
+    quantize_per_tensor_1 = torch.quantize_per_tensor(conv1, conv1_scale_0, conv1_zero_point_0, torch.quint8);  conv1 = conv1_scale_0 = conv1_zero_point_0 = None
+    dequantize_1 = quantize_per_tensor_1.dequantize();  quantize_per_tensor_1 = None
+    conv2 = self.conv2(dequantize, dequantize_1);  dequantize = dequantize_1 = None
+    conv2_scale_0 = self.conv2_scale_0
+    conv2_zero_point_0 = self.conv2_zero_point_0
+    quantize_per_tensor_2 = torch.quantize_per_tensor(conv2, conv2_scale_0, conv2_zero_point_0, torch.quint8);  conv2 = conv2_scale_0 = conv2_zero_point_0 = None
+    dequantize_2 = quantize_per_tensor_2.dequantize();  quantize_per_tensor_2 = None
+    relu = self.relu(dequantize_2);  dequantize_2 = None
+    relu_scale_0 = self.relu_scale_0
+    relu_zero_point_0 = self.relu_zero_point_0
+    quantize_per_tensor_3 = torch.quantize_per_tensor(relu, relu_scale_0, relu_zero_point_0, torch.quint8);  relu = relu_scale_0 = relu_zero_point_0 = None
+    dequantize_3 = quantize_per_tensor_3.dequantize();  quantize_per_tensor_3 = None
+    return dequantize_3
+    
+# To see more debug info, please use `graph_module.print_readable()`
+ref_qconv is: Conv2dAdd(
+  (0): QuantizedConv2d(Reference)(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+)
+model_quantized is: GraphModule(
+  (conv1): QuantizedConv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), scale=0.0055459425784647465, zero_point=128, padding=(1, 1), bias=False)
+  (conv2): QuantizedConv2dAdd(64, 128, kernel_size=(3, 3), stride=(2, 2), scale=0.008548887446522713, zero_point=128, padding=(1, 1), bias=False)
+  (relu): ReLU()
+)
+
+
+
+def forward(self, x):
+    conv1_input_scale_0 = self.conv1_input_scale_0
+    conv1_input_zero_point_0 = self.conv1_input_zero_point_0
+    quantize_per_tensor = torch.quantize_per_tensor(x, conv1_input_scale_0, conv1_input_zero_point_0, torch.quint8);  x = conv1_input_scale_0 = conv1_input_zero_point_0 = None
+    conv1 = self.conv1(quantize_per_tensor)
+    conv2 = self.conv2(quantize_per_tensor, conv1);  quantize_per_tensor = conv1 = None
+    relu = self.relu(conv2);  conv2 = None
+    dequantize_3 = relu.dequantize();  relu = None
+    return dequantize_3
+    
+# To see more debug info, please use `graph_module.print_readable()`
+---- create cache entry----
+---- Go through the cache path ----
+---- create cache entry----
+---- Go through the cache path ----
