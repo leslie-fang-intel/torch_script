@@ -1,0 +1,69 @@
+Start new test case
+with_bias is: False
+sys_quant is: True
+model before prepare is: SimpleNet(
+  (conv1): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+  (conv2): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+  (relu): ReLU()
+  (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+)
+------
+node is: x1
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(98)fuse()
+-> if node_to_subpattern is not None:
+(Pdb) > /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(101)fuse()
+-> node_subpattern = None
+(Pdb) > /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(102)fuse()
+-> if maybe_last_node is node:
+(Pdb) None
+(Pdb) ------
+node is: x2
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(97)fuse()
+-> import pdb;pdb.set_trace()
+(Pdb) ------
+node is: conv1
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(98)fuse()
+-> if node_to_subpattern is not None:
+(Pdb) ------
+node is: conv2
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(97)fuse()
+-> import pdb;pdb.set_trace()
+(Pdb) ------
+node is: add
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py(98)fuse()
+-> if node_to_subpattern is not None:
+(Pdb) pattern is: (<built-in function add>, <class 'torch.nn.modules.conv.Conv2d'>, <class 'torch.nn.modules.conv.Conv2d'>)
+matched_node_pattern is: [add, conv1, conv2]
+root_node_getter is: <function conv_add_root_node_getter_right at 0x7f2ba503fa60>
+extra_inputs_getter is: <function conv_add_extra_inputs_getter_right at 0x7f2ba503faf0>
+matched_modules is: (<built-in function add>, Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False), Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False))
+matched_module_types is: (<built-in function add>, <class 'torch.nn.modules.conv.Conv2d'>, <class 'torch.nn.modules.conv.Conv2d'>)
+op_pattern is: (<built-in function add>, <class 'torch.nn.modules.conv.Conv2d'>, <class 'torch.nn.modules.conv.Conv2d'>)
+> /home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/nn/intrinsic/modules/fused.py(147)__init__()
+-> self.add = add
+(Pdb) Traceback (most recent call last):
+  File "test_conv_add_left_right.py", line 152, in <module>
+    test_pytorch_module()
+  File "test_conv_add_left_right.py", line 91, in test_pytorch_module
+    model_prepared = quantize_fx.prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/quantize_fx.py", line 408, in prepare_fx
+    return _prepare_fx(
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/quantize_fx.py", line 166, in _prepare_fx
+    graph_module = _fuse_fx(
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/quantize_fx.py", line 63, in _fuse_fx
+    return fuse(
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py", line 116, in fuse
+    env[node.name] = obj.fuse(
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fusion_patterns.py", line 107, in fuse
+    extra_args.append(load_arg(input))
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py", line 84, in load_arg
+    return map_arg(a, lambda node: env[node.name])
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/fx/node.py", line 613, in map_arg
+    return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/fx/node.py", line 631, in map_aggregate
+    return fn(a)
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/fx/node.py", line 613, in <lambda>
+    return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
+  File "/home/lesliefang/pytorch_1_7_1/Autocast_Pytorch/pytorch/torch/ao/quantization/fx/fuse.py", line 84, in <lambda>
+    return map_arg(a, lambda node: env[node.name])
+KeyError: 'conv2'
