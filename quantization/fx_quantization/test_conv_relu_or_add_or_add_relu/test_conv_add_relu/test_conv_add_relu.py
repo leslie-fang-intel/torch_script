@@ -97,6 +97,10 @@ def test_pytorch_module():
             np.testing.assert_array_almost_equal(res_ref.cpu().numpy(),
             res_quantized.cpu().numpy(), decimal=2)
 
+            torch.save(model_quantized.conv1.weight(), 'conv1_q_weight.pt')
+            torch.save(model_quantized.conv2.weight(), 'conv2_q_weight.pt')
+            #print("model_quantized.conv2_input_scale_0 is: {}".format(model_quantized.conv2_input_scale_0), flush=True)
+            #print("model_quantized.conv2_input_zero_point_0 is: {}".format(model_quantized.conv2_input_zero_point_0), flush=True)
             exit(-1)
             # print("res_quantized is: {}".format(res_quantized), flush=True)
             
