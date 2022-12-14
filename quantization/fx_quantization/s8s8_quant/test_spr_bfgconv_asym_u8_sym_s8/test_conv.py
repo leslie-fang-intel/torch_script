@@ -85,6 +85,12 @@ def test_pytorch_op():
         Y_scale,
         Y_zero_point)
 
+    _ = qconv_relu(
+        x1_q,
+        W_prepack,
+        Y_scale,
+        Y_zero_point)
+
     res_ref_q = torch.quantize_per_tensor(
         res_ref, scale=Y_scale, zero_point=Y_zero_point, dtype=activation_dtype)
     # print(res_ref_q.int_repr())
@@ -195,6 +201,6 @@ def test_ipex_module():
             assert torch.allclose(res_ref, res, rtol=0.08, atol=0.01)
 
 if __name__ == "__main__":
-    test_pytorch_op()
-    #test_pytorch_module()
+    # test_pytorch_op()
+    test_pytorch_module()
     # test_ipex_module()
