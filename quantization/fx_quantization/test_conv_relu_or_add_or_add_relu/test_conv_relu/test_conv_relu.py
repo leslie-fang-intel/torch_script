@@ -19,7 +19,7 @@ class SimpleNet(torch.nn.Module):
     def forward(self, x):
         x1 = self.relu(self.conv(x))
         # Here we need conv2 to ensure the first conv's output is int8
-        return self.conv3(x1)
+        return x1
 
 def test_pytorch_op():
     x1 = torch.rand(1, 64, 3, 3)
@@ -366,15 +366,21 @@ def test_pytorch_module():
         example_inputs = (x, )
         res_ref = model(x)
         torch.backends.quantized.engine = 'onednn'
-        qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('onednn'))
-        model_prepared = quantize_fx.prepare_fx(model, qconfig_mapping, example_inputs)
+        # qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('onednn'))
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping(backend="onednn")
+        backend_config = torch.ao.quantization.backend_config.onednn.get_onednn_backend_config()
+        model_prepared = quantize_fx.prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
         # calibrate (not shown)
         # model_prepared(x)
+        print("model_prepared is: {}".format(model_prepared), flush=True)
+        print(type(model_prepared.conv))
         for i in range(1):
             images = torch.rand(batch_size, 64, 3, 3)
             model_prepared(images)
         # quantize
-        model_quantized = quantize_fx.convert_fx(model_prepared)
+        model_quantized = quantize_fx.convert_fx(model_prepared, backend_config=backend_config)
+
+        print("model_quantized is: {}".format(model_quantized), flush=True)
 
         model_quantized = torch.jit.trace(model_quantized, x)
         model_quantized = torch.jit.freeze(model_quantized.eval())
@@ -383,7 +389,7 @@ def test_pytorch_module():
             model_quantized(x)
         print(model_quantized.graph_for(x), flush=True)
 
-        print("Final run")
+        print("Final run", flush=True)
         res = model_quantized(x)
 
         # print("res is:{}".format(res))
@@ -433,6 +439,6 @@ def test_ipex_module():
             assert torch.allclose(res_ref, res, rtol=0.08, atol=0.01)
 
 if __name__ == "__main__":
-    test_pytorch_op()
-    # test_pytorch_module()
+    # test_pytorch_op()
+    test_pytorch_module()
     # test_ipex_module()
