@@ -103,7 +103,8 @@ def test_inductor_int8_conv_relu():
         def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
-                in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1
+                # in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1
+                in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
             )
             self.relu = torch.nn.ReLU()
 
@@ -112,7 +113,8 @@ def test_inductor_int8_conv_relu():
             return self.relu(x)
 
     torch.backends.quantized.engine = "x86"
-    example_inputs = (torch.randn(1, 1, 224, 224),)
+    # example_inputs = (torch.randn(1, 1, 224, 224),)
+    example_inputs = (torch.randn(1, 3, 16, 16),)
     m = Mod().eval()
     # program capture
     m, guards = torchdynamo.export(
@@ -195,23 +197,21 @@ def test_inductor_int8_conv_relu_v2():
     torch.backends.quantized.engine = "x86"
     example_inputs = (torch.randn(1, 1, 224, 224),)
     m = Mod().eval()
-    # program capture
+    # Step1: program capture with EXIR
     m, guards = torchdynamo.export(
         m,
         *copy.deepcopy(example_inputs),
         aten_graph=True,
         tracing_mode="real",
     )
-
-    m = m.eval()
+    # Step2: Prepare phase to insert observer for calibration
+    # TODO: Use QTagger in the future
     backend_config = get_inductor_pt2e_backend_config()
-    qconfig = get_default_qconfig("x86")
-    qconfig_mapping = QConfigMapping().set_global(qconfig)
-    before_fusion_result = m(*example_inputs)
-
+    qconfig_mapping = QConfigMapping().set_global(get_default_qconfig("x86"))
     m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+    # Step3: Convert to reference quantized model
     m = convert_pt2e(m)
-    # A few ops in EXIR are not supported. Set nopython=False to make it work
+    # Step4: Lowering to inductor: Op fusion; External call of conv/matmul; Decompose and Code-Gen.
     run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
 
     # first run
@@ -222,4 +222,4 @@ def test_inductor_int8_conv_relu_v2():
 
 if __name__ == "__main__":
     # test_inductor_int8_relu()
-    test_inductor_int8_conv_relu_v2()
+    test_inductor_int8_conv_relu()
