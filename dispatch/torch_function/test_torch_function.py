@@ -16,6 +16,8 @@ class ScalarTensor(object):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        print(type(types), flush=True)
+        print(types.__len__(), flush=True)
         if func not in HANDLED_FUNCTIONS or not all(
             issubclass(t, (torch.Tensor, ScalarTensor))
             for t in types
