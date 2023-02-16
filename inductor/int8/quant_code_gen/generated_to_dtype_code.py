@@ -25,8 +25,12 @@ extern "C" void kernel(const float* __restrict__ in_ptr0,
             //auto res2 = at::vec::Vectorized<c10::quint8>::convert(input);
 
             // once 64 float32 (4*_m512) number will be converted to 64 uint8
-            auto res2 = at::vec::Vectorized<c10::quint8>::convert(in_ptr0 + 64*i0);
-            res2.store(out_ptr0 + 64*i0);
+
+            // auto res2 = at::vec::Vectorized<c10::quint8>::convert(in_ptr0 + 64*i0);
+            // res2.store(out_ptr0 + 64*i0);
+
+            auto res4 = at::vec::Vectorized<uint8_t>::convert_from_float(in_ptr0 + 64*i0);
+            res4.store(out_ptr0 + 64*i0);
         }
     }
 }
