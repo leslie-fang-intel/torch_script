@@ -18,7 +18,7 @@ from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
-from torch._inductor.compile_fx import compile_fx
+from torch._inductor.compile_fx import compile_fx, compile_fx_quantization
 
 def test_inductor_int8_relu():
     import copy
@@ -68,14 +68,15 @@ def test_inductor_int8_relu():
     print("model after convert_pt2e is: {}".format(m), flush=True)
 
     # A few ops in EXIR are not supported. Set nopython=False to make it work
-    run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+
+    run = compile_fx_quantization(m, example_inputs)
 
     # first run
     inductor_result = run(*example_inputs)
 
     module_result = m(*example_inputs)
     # self.assertEqual(inductor_result, module_result)
-    torch.allclose(inductor_result, module_result, rtol=1e-05, atol=1e-08)
+    torch.allclose(inductor_result[0], module_result[0], rtol=1e-05, atol=1e-08)
 
     # second run
     inductor_result = run(*example_inputs)
@@ -204,6 +205,7 @@ def test_inductor_int8_conv_relu_v2():
         aten_graph=True,
         tracing_mode="real",
     )
+    print(m)
     # Step2: Prepare phase to insert observer for calibration
     # TODO: Use QTagger in the future
     backend_config = get_inductor_pt2e_backend_config()
@@ -212,7 +214,7 @@ def test_inductor_int8_conv_relu_v2():
     # Step3: Convert to reference quantized model
     m = convert_pt2e(m)
     # Step4: Lowering to inductor: Op fusion; External call of conv/matmul; Decompose and Code-Gen.
-    run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+    run = compile_fx_quantization(m, example_inputs)
 
     # first run
     inductor_result = run(*example_inputs)
@@ -221,5 +223,5 @@ def test_inductor_int8_conv_relu_v2():
     inductor_result = run(*example_inputs)
 
 if __name__ == "__main__":
-    # test_inductor_int8_relu()
-    test_inductor_int8_conv_relu()
+    test_inductor_int8_relu()
+    #test_inductor_int8_conv_relu()
