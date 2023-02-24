@@ -150,25 +150,31 @@ def test_inductor_int8_conv_relu():
         flush=True)
 
     # A few ops in EXIR are not supported. Set nopython=False to make it work
-    run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+    # run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+    # run = compile_fx_quantization(m, example_inputs, pytree_unflatten = True)
+    for pytree_unflatten in [True, False]:
+        copy_m = copy.deepcopy(m)
+        run = compile_fx_quantization(copy_m, example_inputs, pytree_unflatten = pytree_unflatten)
 
-    # first run
-    print("start the first run", flush=True)
-    inductor_result = run(*example_inputs)
+        # first run
+        print("start the first run", flush=True)
+        inductor_result = run(*example_inputs)
 
-    print("example_inputs is: {}".format(example_inputs[0]), flush=True)
-    print("before_fusion_result is: {}".format(before_fusion_result), flush=True)
-    print("after_quant_result is: {}".format(after_quant_result), flush=True)
-    print("inductor first run result is: {}".format(inductor_result), flush=True)
 
-    # second run
-    print("start the second run", flush=True)
-    inductor_result = run(*example_inputs)
+        # second run
+        print("start the second run", flush=True)
+        # import pdb;pdb.set_trace()
+        inductor_result = run(*example_inputs)
 
-    print("inductor second run result is: {}".format(inductor_result), flush=True)
+        # print("inductor second run result is: {}".format(inductor_result), flush=True)
 
-    # np.testing.assert_array_almost_equal(res_ref.cpu().numpy(),
-    # res_quantized.cpu().numpy(), decimal=2)
+        # np.testing.assert_array_almost_equal(res_ref.cpu().numpy(),
+        # res_quantized.cpu().numpy(), decimal=2)
+        print(type(inductor_result), flush=True)
+        print(type(after_quant_result), flush=True)
+        print(torch.allclose(inductor_result if pytree_unflatten else inductor_result[0], after_quant_result, rtol=1e-05, atol=1e-08), flush=True)
+    print("Finish the test", flush=True)
+
 
 def test_inductor_int8_conv_relu_v2():
     import copy
@@ -223,5 +229,5 @@ def test_inductor_int8_conv_relu_v2():
     inductor_result = run(*example_inputs)
 
 if __name__ == "__main__":
-    test_inductor_int8_relu()
-    #test_inductor_int8_conv_relu()
+    #test_inductor_int8_relu()
+    test_inductor_int8_conv_relu()

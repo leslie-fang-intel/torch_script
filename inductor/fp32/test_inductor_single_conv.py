@@ -39,10 +39,10 @@ def test_single_conv():
             return self.relu(x)
 
     with torch.no_grad():
-        # torch._dynamo.reset()
-
         example_inputs = (torch.randn(1, 3, 16, 16),)
         m = Mod().eval()
+
+        ref_result = m(*example_inputs)
 
         run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
         # first run
@@ -52,8 +52,10 @@ def test_single_conv():
 
         # second run
         print("start the second run", flush=True)
-        # import pdb;pdb.set_trace()
+
         inductor_result = run(*example_inputs)
+        print(type(inductor_result), flush=True)
+        print(torch.allclose(inductor_result, ref_result, rtol=1e-05, atol=1e-08), flush=True)
 
 if __name__ == "__main__":
     test_single_conv()
