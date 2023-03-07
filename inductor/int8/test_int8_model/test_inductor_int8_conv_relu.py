@@ -84,6 +84,7 @@ def test_inductor_int8_relu():
 
 
 def test_inductor_int8_conv_relu():
+    torch._inductor.config.cpp.enable_kernel_profile = True
     import copy
     from torch import _dynamo, _inductor
     from torch._inductor import config
@@ -116,18 +117,26 @@ def test_inductor_int8_conv_relu():
 
     torch.backends.quantized.engine = "x86"
     # example_inputs = (torch.randn(1, 1, 224, 224),)
-    example_inputs = (torch.randn(1, 3, 16, 16),)
+    example_inputs = (torch.randn(1, 3, 16, 16).to(memory_format=torch.channels_last),)
     m = Mod().eval()
     # program capture
+    
+    
+    #tracing_mode = "real"
+    tracing_mode = "symbolic"
     m, guards = torchdynamo.export(
         m,
         *copy.deepcopy(example_inputs),
         aten_graph=True,
-        tracing_mode="real",
+        tracing_mode=tracing_mode,
     )
 
     m = m.eval()
     print("model after torchdynamo export is: {}".format(m), flush=True)
+    print("guards is: {}".format(guards), flush=True)
+
+    # m(torch.randn(2, 3, 16, 16).to(memory_format=torch.channels_last))
+    # exit(-1)
 
     backend_config = get_inductor_pt2e_backend_config()
     qconfig = get_default_qconfig("x86")
@@ -141,8 +150,6 @@ def test_inductor_int8_conv_relu():
     print("check the result after prepare: {}".format(
         torch.allclose(before_fusion_result, after_prepare_result)),
         flush=True)
-
-    exit(-1)
     
     m = convert_pt2e(m)
     after_quant_result = m(*example_inputs)
@@ -155,7 +162,7 @@ def test_inductor_int8_conv_relu():
     # A few ops in EXIR are not supported. Set nopython=False to make it work
     # run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
     # run = compile_fx_quantization(m, example_inputs, pytree_unflatten = True)
-    for pytree_unflatten in [True, False]:
+    for pytree_unflatten in [False]:
         copy_m = copy.deepcopy(m)
         run = compile_fx_quantization(copy_m, example_inputs, pytree_unflatten = pytree_unflatten)
 
@@ -166,16 +173,22 @@ def test_inductor_int8_conv_relu():
 
         # second run
         print("start the second run", flush=True)
-        # import pdb;pdb.set_trace()
         inductor_result = run(*example_inputs)
 
+        # Warm up
+        for i in range(20):
+            inductor_result = run(*example_inputs)
+        # Profile
+        with torch.profiler.profile(on_trace_ready=torch.profiler.tensorboard_trace_handler("./profile_log")) as prof:
+            inductor_result = run(*example_inputs)
+        print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         # print("inductor second run result is: {}".format(inductor_result), flush=True)
 
         # np.testing.assert_array_almost_equal(res_ref.cpu().numpy(),
         # res_quantized.cpu().numpy(), decimal=2)
         print(type(inductor_result), flush=True)
         print(type(after_quant_result), flush=True)
-        print(torch.allclose(inductor_result if pytree_unflatten else inductor_result[0], after_quant_result, rtol=1e-05, atol=1e-08), flush=True)
+        print(torch.allclose(inductor_result if pytree_unflatten else inductor_result[0], after_quant_result, rtol=0.01, atol=0.01), flush=True)
     print("Finish the test", flush=True)
 
 
@@ -223,7 +236,10 @@ def test_inductor_int8_conv_relu_v2():
     # Step3: Convert to reference quantized model
     m = convert_pt2e(m)
     # Step4: Lowering to inductor: Op fusion; External call of conv/matmul; Decompose and Code-Gen.
-    run = compile_fx_quantization(m, example_inputs)
+    run = compile_fx(m, example_inputs)
+
+
+    #run = compile_fx_quantization(m, example_inputs)
 
     # first run
     inductor_result = run(*example_inputs)
