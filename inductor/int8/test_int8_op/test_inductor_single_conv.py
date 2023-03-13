@@ -50,6 +50,8 @@ def test_pytorch_op():
         # 我们应该直接从module去save 量化好的tensor,并load
         w1_q = torch.load('conv1_q_weight.pt')
 
+        print("w1_q is: {}".format(w1_q.q_per_channel_zero_points()), flush=True)
+
         # Step1: Calculate the refer result
         model.conv1.weight = torch.nn.Parameter(torch.dequantize(w1_q))
         res_ref = conv1(torch.dequantize(x_q))
@@ -150,5 +152,5 @@ def test_inductor_pytorch_op():
         decimal=2)
 
 if __name__ == "__main__":
-    # test_pytorch_op()
-    test_inductor_pytorch_op()
+    test_pytorch_op()
+    # test_inductor_pytorch_op()

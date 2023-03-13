@@ -195,8 +195,11 @@ def test():
         y_scale, y_zero_point
     )
 
+    print("x_q_inductor: {}".format(x_q_inductor.cpu().numpy()), flush=True)
+    print("w_q_inductor: {}".format(w_q_inductor.cpu().numpy()), flush=True)
     print("result_ref_q is: {}".format(result_ref_q.int_repr().cpu().numpy()), flush=True)
     print("y_q_inductor is: {}".format(y_q_inductor.cpu().numpy()), flush=True)
+    print("x2_q_inductor is: {}".format(x2_q_inductor.cpu().numpy()), flush=True)
 
     import numpy as np
     np.testing.assert_array_almost_equal(
