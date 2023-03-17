@@ -28,10 +28,10 @@ def test_expected():
     from torch._inductor.compile_fx import compile_fx, compile_fx_quantization
     torch.backends.quantized.engine = "x86"
     example_inputs = (torch.randn(1, 3, 16, 16),)
-    # m = Mod().eval()
+    m = Mod().eval()
     
-    import torchvision.models as models
-    m = models.__dict__["resnet50"](pretrained=True).eval()
+    # import torchvision.models as models
+    # m = models.__dict__["resnet50"](pretrained=True).eval()
 
     m, guards = torchdynamo.export(
         m,
@@ -76,7 +76,7 @@ def test_expected():
     print(torch.allclose(inductor_result[0], after_quant_result, rtol=1e-01, atol=1e-01), flush=True)
     print("Finish the test", flush=True)
 
-def test():
+def test_issue_example():
     from torch.ao.quantization.backend_config import (
         BackendConfig,
         DTypeConfig,
@@ -162,10 +162,60 @@ def test():
     print("model after prepare_pt2e is: {}".format(m), flush=True)
 
     from torch.fx.passes.graph_drawer import FxGraphDrawer
-    g = FxGraphDrawer(m, "resnet50")
-    g.get_dot_graph().write_svg("prepare_rn50_graph.svg")
+    g = FxGraphDrawer(m, "conv_add_relu")
+    g.get_dot_graph().write_svg("prepare_conv_add_relu_graph.svg")
+    # g = FxGraphDrawer(m, "resnet50")
+    # g.get_dot_graph().write_svg("prepare_rn50_graph.svg")
+
+def test():
+    from torch.ao.quantization.backend_config import (
+        BackendConfig,
+        DTypeConfig,
+        ObservationType,
+        BackendPatternConfig,
+    )
+    from torch.ao.quantization.utils import MatchAllNode
+    import itertools
+    import copy
+    weighted_op_quint8_dtype_config = DTypeConfig(
+        input_dtype=torch.quint8,
+        output_dtype=torch.quint8,
+        weight_dtype=torch.qint8,
+        bias_dtype=torch.float,
+    )
+    from torch.ao.quantization.backend_config._inductor_pt2e import get_inductor_pt2e_backend_config
+    torch.backends.quantized.engine = "x86"
+    example_inputs = (torch.randn(1, 3, 16, 16),)
+    m = Mod().eval()
+
+    # import torchvision.models as models
+    # m = models.__dict__["resnet50"](pretrained=True).eval()
+    
+    m, guards = torchdynamo.export(
+        m,
+        *copy.deepcopy(example_inputs),
+        aten_graph=True,
+        tracing_mode="real",
+    )
+    m = m.eval()
+    print("model after torchdynamo export is: {}".format(m), flush=True)
+
+    backend_config = get_inductor_pt2e_backend_config()
+    qconfig = get_default_qconfig("x86")
+    qconfig_mapping = QConfigMapping().set_global(qconfig)
+    before_fusion_result = m(*example_inputs)
+
+    m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+    after_prepare_result = m(*example_inputs)
+    print("model after prepare_pt2e is: {}".format(m), flush=True)
+
+    from torch.fx.passes.graph_drawer import FxGraphDrawer
+    g = FxGraphDrawer(m, "conv_add_relu")
+    g.get_dot_graph().write_svg("prepare_conv_add_relu_graph.svg")
+    # g = FxGraphDrawer(m, "resnet50")
+    # g.get_dot_graph().write_svg("prepare_rn50_graph.svg")
 
 if __name__ == "__main__":
     #test_expected()
+    #test_issue_example()
     test()
-    # test_torch_compile()

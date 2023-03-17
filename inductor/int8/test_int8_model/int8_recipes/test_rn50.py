@@ -153,8 +153,8 @@ def test_int8_torch_compile():
         QConfigMapping,
     )
    
-    # model = models.__dict__["resnet50"](pretrained=True).eval()
-    model = M(False, False).eval()
+    model = models.__dict__["resnet50"](pretrained=True).eval()
+    #model = M(False, False).eval()
 
     tracing_mode = "real"
     #tracing_mode = "symbolic"
@@ -180,13 +180,13 @@ def test_int8_torch_compile():
     with torch.no_grad():
         base_res = m(*example_inputs)
         base_res = m(*example_inputs)
-        print("base_res.size() is: {}".format(base_res.size()), flush=True)
-        input2 = torch.randn(200, 3, 224, 224).contiguous(memory_format=torch.channels_last)
-        base_res2 = m(input2)
-        print("base_res2.size() is: {}".format(base_res2.size()), flush=True)
-        input3 = torch.randn(2, 3, 224, 224).contiguous(memory_format=torch.channels_last)
-        base_res3 = m(input3)
-        print("base_res3.size() is: {}".format(base_res3.size()), flush=True)
+        # print("base_res.size() is: {}".format(base_res.size()), flush=True)
+        # input2 = torch.randn(200, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+        # base_res2 = m(input2)
+        # print("base_res2.size() is: {}".format(base_res2.size()), flush=True)
+        # input3 = torch.randn(2, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+        # base_res3 = m(input3)
+        # print("base_res3.size() is: {}".format(base_res3.size()), flush=True)
 
         torch.backends.quantized.engine = "x86"
         backend_config = get_inductor_pt2e_backend_config()
@@ -194,9 +194,18 @@ def test_int8_torch_compile():
         qconfig_mapping = QConfigMapping().set_global(qconfig)
         prepared_model = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config=backend_config)
 
+
+
         # Must use dummy input to init, otherwise conv weight scale dim size is not initlized correctly
         prepared_model(*example_inputs)
 
+        print("The prepared_model is: {}".format(prepared_model), flush=True)
+        from torch.fx.passes.graph_drawer import FxGraphDrawer
+        # g = FxGraphDrawer(m, "conv_add_relu")
+        # g.get_dot_graph().write_svg("prepare_conv_add_relu_graph.svg")
+        g = FxGraphDrawer(m, "resnet50")
+        g.get_dot_graph().write_svg("prepare_rn50_graph.svg")
+        return
         converted_model = convert_pt2e(prepared_model)
 
         # from torch.fx.passes.graph_drawer import FxGraphDrawer
@@ -222,5 +231,5 @@ if __name__ == "__main__":
     # test_fp32()
     # test_fp32_torch_compile()
     
-    # test_int8()
+    #test_int8()
     test_int8_torch_compile()
