@@ -20,6 +20,19 @@ from torch.ao.ns.fx.utils import (
 )
 from torch._inductor.compile_fx import compile_fx
 
+
+from torch._decomp import get_decompositions
+from torch.fx.experimental.proxy_tensor import make_fx
+
+quant_decomp = get_decompositions(
+    [
+        torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    ]
+)
+
 def test_inductor_int8_relu():
     import copy
     from torch import _dynamo, _inductor
@@ -153,6 +166,9 @@ def test_inductor_int8_conv_relu():
             flush=True)
         
         m = convert_pt2e(m)
+
+        # m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
+
         after_quant_result = m(*example_inputs)
         print("model after convert_pt2e is: {}".format(m), flush=True)
 
