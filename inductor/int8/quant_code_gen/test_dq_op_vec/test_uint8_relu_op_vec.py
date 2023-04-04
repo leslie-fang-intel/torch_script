@@ -76,6 +76,7 @@ def test1():
     real_out = fn(x)
 
     compiled_out = opt_fn(x)
+    print("real_out is: {}".format(real_out), flush=True)
     print("compiled_out is: {}".format(compiled_out), flush=True)
     tol = 0.0001
     print(torch.allclose(real_out, compiled_out, atol=tol, rtol=tol))
