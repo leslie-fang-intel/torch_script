@@ -10,6 +10,7 @@ from torch._inductor.compile_fx import (
     compile_fx_inner,
     complex_memory_overlap,
 )
+from torch._inductor import codecache, config, metrics, test_operators
 
 torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
@@ -80,7 +81,23 @@ def test1():
     print("compiled_out is: {}".format(compiled_out), flush=True)
     tol = 0.0001
     print(torch.allclose(real_out, compiled_out, atol=tol, rtol=tol))
+    assert torch.allclose(real_out, compiled_out, atol=tol, rtol=tol), "Fail to compare result of real_out and compiled_out"
 
 if __name__ == "__main__":
-    test1()
+    simdlen = None # Default, on this system is avx512 version
+    simdlen = 1 # scalar version
+    simdlen = 255 # scalar version
+    simdlen = 256 # Unspported avx2 version
+    #simdlen = 257 # scalar version
+    #simdlen = 512 # avx512 version
+    #simdlen = 513 # scalar version
+
+    simdlens = [None, 1, 255, 256, 257, 512, 513]
+
+    for simdlen in simdlens:
+        print("simdlen is: {}".format(simdlen), flush=True)
+        with config.patch({"cpp.simdlen": simdlen}):
+            torch._dynamo.reset()
+            metrics.reset()
+            test1()
 
