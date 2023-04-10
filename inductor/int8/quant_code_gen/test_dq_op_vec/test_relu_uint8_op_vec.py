@@ -15,6 +15,7 @@ from torch._inductor import codecache, config, metrics, test_operators
 torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
+torch._inductor.config.trace.debug_log = True
 torch._inductor.config.debug = True
 
 local_seed = 2023
@@ -131,7 +132,7 @@ if __name__ == "__main__":
 
     simdlens = [None, 1, 255, 256, 257, 512, 513]
 
-    # simdlens = [1]
+    #simdlens = [512]
 
     for simdlen in simdlens:
         print("simdlen is: {}".format(simdlen), flush=True)

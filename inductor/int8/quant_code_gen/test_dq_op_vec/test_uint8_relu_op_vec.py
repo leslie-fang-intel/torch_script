@@ -15,6 +15,7 @@ from torch._inductor import codecache, config, metrics, test_operators
 torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
+torch._inductor.config.trace.debug_log = True
 torch._inductor.config.debug = True
 
 local_seed = 2023
@@ -40,7 +41,7 @@ def test1():
         #return (y, )
 
     # **TODO** Also test channel_last format
-    x = torch.randn((1, 3, 224, 224), dtype=torch.float) * 100
+    x = torch.randn((1, 3, 257, 257), dtype=torch.float) * 100
     x = x.to(torch.uint8)
 
     #x2 = torch.randn((1, 3, 224, 224), dtype=torch.float) * 100
@@ -93,6 +94,8 @@ if __name__ == "__main__":
     #simdlen = 513 # scalar version
 
     simdlens = [None, 1, 255, 256, 257, 512, 513]
+
+    simdlens = [None]
 
     for simdlen in simdlens:
         print("simdlen is: {}".format(simdlen), flush=True)
