@@ -120,22 +120,8 @@ def test_issue_example():
     # g.get_dot_graph().write_svg("prepare_rn50_graph.svg")
 
 def test():
-    from torch.ao.quantization.backend_config import (
-        BackendConfig,
-        DTypeConfig,
-        ObservationType,
-        BackendPatternConfig,
-    )
-    from torch.ao.quantization.utils import MatchAllNode
-    import itertools
     import copy
-    weighted_op_quint8_dtype_config = DTypeConfig(
-        input_dtype=torch.quint8,
-        output_dtype=torch.quint8,
-        weight_dtype=torch.qint8,
-        bias_dtype=torch.float,
-    )
-    from torch.ao.quantization.backend_config._inductor_pt2e import get_inductor_pt2e_backend_config
+
     torch.backends.quantized.engine = "x86"
     example_inputs = (torch.randn(1, 3, 16, 16),)
     m = Mod().eval()
@@ -152,12 +138,16 @@ def test():
     m = m.eval()
     print("model after torchdynamo export is: {}".format(m), flush=True)
 
-    backend_config = get_inductor_pt2e_backend_config()
-    qconfig = get_default_qconfig("x86")
-    qconfig_mapping = QConfigMapping().set_global(qconfig)
+
     before_fusion_result = m(*example_inputs)
 
-    m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+    from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
+    from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e, prepare_pt2e_quantizer
+    quantizer = X86InductorQuantizer()
+    operator_spec = xiq.get_default_x86_inductor_operator_spec()
+    quantizer.set_global(operator_spec)
+    m = prepare_pt2e_quantizer(m, quantizer)
     after_prepare_result = m(*example_inputs)
     print("model after prepare_pt2e is: {}".format(m), flush=True)
 

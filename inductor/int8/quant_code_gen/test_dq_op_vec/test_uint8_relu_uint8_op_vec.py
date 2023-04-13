@@ -58,7 +58,7 @@ def test1():
         convert_element_type_1 = torch.ops.prims.convert_element_type.default(relu, torch.uint8);  relu = None
         return (convert_element_type_1,)
     """
-    opt_fn = torch._dynamo.optimize("inductor")(fn)
+    # opt_fn = torch._dynamo.optimize("inductor")(fn)
 
 
     # """
@@ -69,8 +69,9 @@ def test1():
     # _to_copy_1 = torch.ops.aten._to_copy.default(relu, dtype = torch.uint8);  relu = None
     # return _to_copy_1
     # """
-    # traced = make_fx(fn)(x)
-    # print("traced graph is: {}".format(traced), flush=True)
+    traced = make_fx(fn)(x)
+    print("traced graph is: {}".format(traced), flush=True)
+    opt_fn = compile_fx(traced, [x, ])
     # opt_fn = compile_fx_inner(traced, [x, ])
     
     opt_fn(x)

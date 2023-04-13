@@ -5,6 +5,12 @@ import logging
 import numpy as np
 import random
 from torch._inductor import codecache, config, metrics, test_operators
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
 
 torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
@@ -48,9 +54,17 @@ def test1():
     zero_point = 100
     scale = 0.001
 
+    # zero_point = torch.tensor(100)
+    # scale = torch.tensor(0.001)
+
     print("x is: {}".format(x), flush=True)
 
     opt_fn = torch._dynamo.optimize("inductor")(fn)
+    
+    # traced = make_fx(fn)(x, zero_point, scale)
+    # print("traced graph is: {}".format(traced), flush=True)
+    # opt_fn = compile_fx(traced, [x, zero_point, scale])
+
     opt_fn(x, zero_point, scale)
 
     real_out = fn(x, zero_point, scale)
@@ -77,7 +91,7 @@ if __name__ == "__main__":
 
     simdlens = [None, 1, 255, 256, 257, 512, 513]
 
-    #simdlens = [512]
+    simdlens = [None]
 
     for simdlen in simdlens:
         with config.patch({"cpp.simdlen": simdlen}):
