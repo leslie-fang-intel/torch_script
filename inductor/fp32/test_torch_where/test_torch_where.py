@@ -5,7 +5,7 @@ import torch._inductor
 from torch import _dynamo, _inductor
 from torch._inductor import config
 
-torch._dynamo.config.log_level = logging.DEBUG
+# torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.debug = True

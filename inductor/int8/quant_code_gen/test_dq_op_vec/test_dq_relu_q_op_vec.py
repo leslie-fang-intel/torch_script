@@ -12,7 +12,7 @@ from torch._inductor.compile_fx import (
     complex_memory_overlap,
 )
 
-torch._dynamo.config.log_level = logging.DEBUG
+# torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.trace.debug_log = True

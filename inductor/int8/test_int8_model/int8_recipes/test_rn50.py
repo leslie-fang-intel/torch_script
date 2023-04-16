@@ -5,7 +5,7 @@ import copy
 from torch._inductor.compile_fx import compile_fx
 
 import logging
-torch._dynamo.config.log_level = logging.DEBUG
+# torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.debug = True

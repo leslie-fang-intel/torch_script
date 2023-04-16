@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import random
 
-torch._dynamo.config.log_level = logging.DEBUG
+# torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.debug = True

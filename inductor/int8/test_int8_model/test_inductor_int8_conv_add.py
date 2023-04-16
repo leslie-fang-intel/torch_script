@@ -33,7 +33,7 @@ def test_inductor_int8_conv_add():
     np.random.seed(seed=local_seed) # Set Numpy seed
     random.seed(local_seed) # Set the Python seed
 
-    torch._dynamo.config.log_level = logging.DEBUG
+    # torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.verbose = True
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.debug = True
@@ -149,7 +149,7 @@ def test_inductor_int8_conv_add_1_x():
     np.random.seed(seed=local_seed) # Set Numpy seed
     random.seed(local_seed) # Set the Python seed
 
-    torch._dynamo.config.log_level = logging.DEBUG
+    # torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.verbose = True
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.debug = True

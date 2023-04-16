@@ -16,7 +16,7 @@ from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e, pre
 import torch._dynamo as torchdynamo
 import copy
 
-torch._dynamo.config.log_level = logging.DEBUG
+# torch._dynamo.config.log_level = logging.DEBUG
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.trace.debug_log = True
@@ -187,7 +187,7 @@ def test2():
 
 
     import logging
-    torch._dynamo.config.log_level = logging.DEBUG
+    # torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.verbose = True
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.trace.debug_log = True

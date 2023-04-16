@@ -45,7 +45,7 @@ def test_quant_dequant_relu_quant_dequant_model():
     np.random.seed(seed=local_seed) # Set Numpy seed
     random.seed(local_seed) # Set the Python seed
 
-    torch._dynamo.config.log_level = logging.DEBUG
+    # torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.verbose = True
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.debug = True
@@ -130,7 +130,7 @@ def test_dequant_relu_quant_model():
     np.random.seed(seed=local_seed) # Set Numpy seed
     random.seed(local_seed) # Set the Python seed
 
-    torch._dynamo.config.log_level = logging.DEBUG
+    # torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.verbose = True
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.debug = True
