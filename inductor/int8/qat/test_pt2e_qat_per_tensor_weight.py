@@ -56,7 +56,7 @@ def pytorch_pt2e_qat(model_fp, data):
 
     import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
     quantizer = QNNPackQuantizer()
-    quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
+    quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=False, is_qat=True))
 
     # Insert Observer
     m = prepare_qat_pt2e_quantizer(m, quantizer)
