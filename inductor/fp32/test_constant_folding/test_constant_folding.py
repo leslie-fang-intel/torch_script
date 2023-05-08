@@ -19,8 +19,8 @@ def test():
     @torch.compile()
     def foo(mod, x):
         return mod(x)
-    # with config.patch({"optimize_for_inference": True}), torch.no_grad():
-    with config.patch({"optimize_for_inference": False}), torch.no_grad():
+    with config.patch({"optimize_for_inference": True}), torch.no_grad():
+    #with config.patch({"optimize_for_inference": False}), torch.no_grad():
         mod = ConvBN(3, 9, kernel_size=3, stride=2).cpu().eval()
         x = torch.rand(1, 3, 9, 9).cpu()
         ref_y = mod(x)

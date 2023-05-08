@@ -60,19 +60,26 @@ def test_ipex_pt2e_ptq_static_quant():
         for i in range(3):
             prepared_model(*example_inputs)
 
+        from torch.fx.passes.graph_drawer import FxGraphDrawer
+        g = FxGraphDrawer(prepared_model, "resnet50")
+        g.get_dot_graph().write_svg("./prepare_ipex_rn50_staic_quant.svg")
+
         quantized_model = convert_pt2e(prepared_model)
         print("quantized_model is: {}".format(quantized_model), flush=True)
 
-        from torch.fx.passes.graph_drawer import FxGraphDrawer
-        g = FxGraphDrawer(quantized_model, "resnet50")
-        g.get_dot_graph().write_svg("./ipex_rn50_dynamic_quant.svg")
 
         with torch.no_grad():
             model_ipex = torch.jit.trace(quantized_model, example_inputs).eval()
             model_ipex = torch.jit.freeze(model_ipex)
             y = model_ipex(*example_inputs)
             y = model_ipex(*example_inputs)
-            print("model_ipex.graph_for(*example_inputs) is: {}".format(model_ipex.graph_for(*example_inputs)), flush=True)  
+            print("model_ipex.graph_for(*example_inputs) is: {}".format(model_ipex.graph_for(*example_inputs)), flush=True)
+        
+        profiler = True
+        if profiler:
+            with torch.profiler.profile(on_trace_ready=torch.profiler.tensorboard_trace_handler("./profiler")) as prof:
+                _ = model_ipex(*example_inputs)
+            print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         print("---- Finish the testing ----", flush=True)
 
 if __name__ == "__main__":
