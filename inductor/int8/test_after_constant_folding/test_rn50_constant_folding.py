@@ -32,13 +32,24 @@ from torch.ao.quantization._quantize_pt2e import (
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
 torch._inductor.config.debug = True
+torch._inductor.config.freezing = True
 
+class M(torch.nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.conv = nn.Conv2d(3, 6, 2, bias=bias, stride=2, padding=0, dilation=1)
+
+    def forward(self, x):
+        return self.conv(x)
 
 def test_rn50():
     import torchvision
 
     example_inputs = (torch.randn(1, 3, 224, 224),)
     m = torchvision.models.resnet50().eval()
+    #m = M(bias=False).eval()
+    #m = M(bias=True).eval()
+    
     m_copy = copy.deepcopy(m)
 
     export_model, guards = torchdynamo.export(
@@ -71,7 +82,37 @@ def test_rn50():
         print("start the second run", flush=True)
         compiler_model(*example_inputs)
 
+def test_rn50_fp32():
+    import torchvision
 
+    example_inputs = (torch.randn(1, 3, 224, 224),)
+    #m = torchvision.models.resnet50().eval()
+    m = M().eval()
+    
+    m_copy = copy.deepcopy(m)
+
+    export_model, guards = torchdynamo.export(
+        m,
+        *copy.deepcopy(example_inputs),
+        aten_graph=True
+    )
+
+    from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
+    import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+    quantizer = X86InductorQuantizer()
+    operator_config = xiq.get_default_x86_inductor_quantization_config()
+    quantizer.set_global(operator_config)
+
+    with torch.no_grad():
+
+        compiler_model = torch.compile(export_model)
+
+        print("start the first run", flush=True)
+        compiler_model(*example_inputs)
+
+        print("start the second run", flush=True)
+        compiler_model(*example_inputs)
 
 if __name__ == "__main__":
     test_rn50()
+    #test_rn50_fp32()
