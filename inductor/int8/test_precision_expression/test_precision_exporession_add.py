@@ -28,6 +28,14 @@ torch._inductor.config.debug = True
 torch._inductor.config.verbose_progress = True
 from torch._inductor.compile_fx import compile_fx
 
+import numpy as np
+import random
+
+local_seed = 2023
+torch.manual_seed(local_seed) # Set PyTorch seed
+np.random.seed(seed=local_seed) # Set Numpy seed
+random.seed(local_seed) # Set the Python seed
+
 def test():
     class M(torch.nn.Module):
         def __init__(self):
@@ -60,9 +68,6 @@ def test():
     m = convert_pt2e(m, use_reference_representation=True)
     print("m_ref:", m_ref)
     print("m:", m)
-
-
-
 
     # optimized_model = compile_fx(m_ref, example_inputs)
     # print("first run", flush=True)
