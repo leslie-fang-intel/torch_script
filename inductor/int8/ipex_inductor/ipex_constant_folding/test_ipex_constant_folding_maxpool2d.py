@@ -26,14 +26,17 @@ torch._inductor.config.freezing = True
 class M(torch.nn.Module):
     def __init__(self, bias=True):
         super().__init__()
-        self.conv = nn.Conv2d(3, 6, 2, bias=bias, stride=2, padding=0, dilation=1)
+        self.conv = nn.Conv2d(3, 64, 7, bias=bias, stride=2, padding=3, dilation=1)
+        self.relu = torch.nn.ReLU(inplace=True)
+        self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(64, 64, 1, bias=False, stride=1, padding=0, dilation=1)
 
     def forward(self, x):
-        return self.conv(x)
+        return self.conv2(self.maxpool(self.relu(self.conv(x))))
 
 def test_qnnpack_quantizer():
-    example_inputs = (torch.randn(1, 3, 224, 224),)
-    use_bias = False
+    example_inputs = (torch.randn(128, 3, 224, 224).contiguous(memory_format=torch.channels_last),)
+    use_bias = True
     m = M(bias=use_bias).eval()
     
     m_copy = copy.deepcopy(m)
@@ -54,14 +57,14 @@ def test_qnnpack_quantizer():
         ipex.quantization.get_default_ipex_quantization_config()
     )
 
+    prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+    print("prepared model is: {}".format(prepare_model), flush=True)
+    prepare_model(*example_inputs)
+
+    convert_model = convert_pt2e(prepare_model)
+    print("converted model is: {}".format(convert_model), flush=True)
+    
     with torch.no_grad():
-        prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
-        print("prepared model is: {}".format(prepare_model), flush=True)
-        prepare_model(*example_inputs)
-
-        convert_model = convert_pt2e(prepare_model)
-        print("converted model is: {}".format(convert_model), flush=True)
-
         convert_model.eval()
 
         # compiler_model = torch.compile(convert_model)
@@ -82,5 +85,33 @@ def test_qnnpack_quantizer():
         # self.assertEqual(out_eager[0], out_comp, atol=5e-2, rtol=5e-2)
         print(torch.allclose(out_eager[0], out_comp, atol=5e-2, rtol=5e-2))
 
+def test_fp32():
+    example_inputs = (torch.randn(128, 3, 224, 224).contiguous(memory_format=torch.channels_last),)
+    use_bias = True
+    m = M(bias=use_bias).eval()
+    
+    m_copy = copy.deepcopy(m)
+
+    export_model, guards = torchdynamo.export(
+        m,
+        *copy.deepcopy(example_inputs),
+        aten_graph=True
+    )
+
+    with torch.no_grad():
+        export_model.eval()
+
+        # compiler_model = torch.compile(convert_model)
+        # compiler_model = compile_fx(convert_model, example_inputs)
+        compiler_model = ipex_compile_fx(export_model, example_inputs)
+
+        print("start the first run", flush=True)
+        compiler_model(*example_inputs)
+
+        print("start the second run", flush=True)
+        out_comp = compiler_model(*example_inputs)
+
 if __name__ == "__main__":
-    test_qnnpack_quantizer()
+    # test_qnnpack_quantizer()
+    test_fp32()    
+
