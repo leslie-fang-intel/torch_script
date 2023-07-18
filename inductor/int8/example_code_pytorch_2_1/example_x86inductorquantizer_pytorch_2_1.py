@@ -1,3 +1,5 @@
+# Execution Command:
+# TORCHINDUCTOR_FREEZING=1 python example_x86inductorquantizer_pytorch_2_1.py
 import torch
 import torchvision.models as models
 import torch._dynamo as torchdynamo
