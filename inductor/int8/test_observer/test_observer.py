@@ -14,6 +14,11 @@ def test2():
     obser(mask2)
 
     mask3 = torch.tensor([-3.4028234663852886 * 10**38, 1.0, 2])
+
+
+    # print(mask3)
+    # print(mask3 + -3.4028234663852886 * 10**30)
+
     obser(mask3)
     scale, zp = obser.calculate_qparams()
     print("scale is: {}".format(scale))

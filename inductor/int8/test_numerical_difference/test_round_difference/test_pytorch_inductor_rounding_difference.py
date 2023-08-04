@@ -55,6 +55,7 @@ def test_pytorch_inductor_to_uint8():
     res = compiled(*example_inputs)
     print("input is: {}; to_int8 res is: {}".format(example_inputs[0], res), flush=True)
     example_inputs = (torch.ones((17)) * 4.6, )
+    print(example_inputs[0].dtype)
     res = compiled(*example_inputs)
     print("input is: {}; to_int8 res is: {}".format(example_inputs[0], res), flush=True)    
     example_inputs = (torch.ones((17)) * 4.5, )

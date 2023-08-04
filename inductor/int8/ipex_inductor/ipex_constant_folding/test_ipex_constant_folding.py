@@ -23,6 +23,13 @@ torch._inductor.config.trace.debug_log = True
 torch._inductor.config.freezing = True
 
 
+import numpy as np
+import random
+local_seed = 2017
+torch.manual_seed(local_seed) # Set PyTorch seed
+np.random.seed(seed=local_seed) # Set Numpy seed
+random.seed(local_seed) # Set the Python seed
+
 class M(torch.nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -32,8 +39,8 @@ class M(torch.nn.Module):
         return self.conv(x)
 
 def test_qnnpack_quantizer():
-    example_inputs = (torch.randn(1, 3, 224, 224),)
-    use_bias = False
+    example_inputs = (torch.randn(1, 3, 224, 224).contiguous(memory_format=torch.channels_last),)
+    use_bias = True
     m = M(bias=use_bias).eval()
     
     m_copy = copy.deepcopy(m)
@@ -64,6 +71,8 @@ def test_qnnpack_quantizer():
 
         convert_model.eval()
 
+        convert_model2 = copy.deepcopy(convert_model)
+
         # compiler_model = torch.compile(convert_model)
         # compiler_model = compile_fx(convert_model, example_inputs)
         compiler_model = ipex_compile_fx(convert_model, example_inputs)
@@ -73,6 +82,11 @@ def test_qnnpack_quantizer():
 
         print("start the second run", flush=True)
         out_comp = compiler_model(*example_inputs)
+
+
+        # compiler_model2 = ipex_compile_fx(convert_model2, example_inputs)
+        # compiler_model2(*example_inputs)
+        # compiler_model2(*example_inputs)
 
         out_eager = convert_model(*example_inputs)
 

@@ -9,43 +9,46 @@ torch._inductor.config.trace.debug_log = True
 torch._inductor.config.debug = True
 torch._inductor.config.freezing = True
 
-# class QMaxpool2d(torch.nn.Module):
-#     def __init__(self,):
-#         super().__init__()
-#         self.maxpool = torch.nn.MaxPool2d(3, stride=2)
+def test_qadaptive_avg_pool2d_op():
 
-#     def forward(self, x):
-#         return self.maxpool(x)
+    # shape = [2, 2]
+    shape = [1, 1]
 
-def test_qmaxpool2d_op():
     input = torch.randint(0, 8, (1, 3, 8, 8), dtype=torch.uint8).contiguous(memory_format=torch.channels_last)
+    
+    print("input is: {}".format(input), flush=True)
+    
     with torch.no_grad():
-        # m = QMaxpool2d().eval()
+        # dq-adaptive_avg_pool2d-q
+        # input1 = copy.deepcopy(input)
+        # dequant_input =  torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
+        #     input1,
+        #     scale=torch.tensor(0.1, dtype=torch.float),
+        #     zero_point=torch.tensor(1, dtype=torch.int64),
+        #     quant_min=0,
+        #     quant_max=255,
+        #     dtype=torch.uint8,
+        # )
+        # dequant_adaptive_avg_pool2d = torch.ops.aten.adaptive_avg_pool2d(dequant_input, shape)
+        # res_ref = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+        #     dequant_adaptive_avg_pool2d,
+        #     scale=torch.tensor(0.1, dtype=torch.float),
+        #     zero_point=torch.tensor(1, dtype=torch.int64),
+        #     quant_min=0,
+        #     quant_max=255,
+        #     dtype=torch.uint8,
+        # )
+        # print("res_ref: {}".format(res_ref), flush=True)
 
-        # dq-maxpool-q
-        dequant_input =  torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
-            input,
-            scale=torch.tensor(0.1, dtype=torch.float),
-            zero_point=torch.tensor(1, dtype=torch.int64),
-            quant_min=0,
-            quant_max=255,
-            dtype=torch.uint8,
-        )
-        dequant_maxpool2d = torch.ops.aten.max_pool2d_with_indices.default(dequant_input, [3, 3], [2, 2])[0]
-        res_ref = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
-            dequant_maxpool2d,
-            scale=torch.tensor(0.1, dtype=torch.float),
-            zero_point=torch.tensor(1, dtype=torch.int64),
-            quant_min=0,
-            quant_max=255,
-            dtype=torch.uint8,
-        )
-        print("res_ref: {}".format(res_ref), flush=True)
+        # # adaptive_avg_pool2d uint8
+        # input2 = copy.deepcopy(input)
+        # res = torch.ops.aten.adaptive_avg_pool2d(input2, shape)
+        # print("res: {}".format(res), flush=True)
+        # print(torch.allclose(res, res_ref, atol=5e-2, rtol=5e-2))
 
-        # maxpool uint8
-        res = torch.ops.aten.max_pool2d_with_indices.default(input, [3, 3], [2, 2])[0]
-        print("res: {}".format(res), flush=True)
-        print(torch.allclose(res, res_ref, atol=5e-2, rtol=5e-2))
+
+        input2 = copy.deepcopy(input)
+        res = torch.ops.aten.mean.dim(input2, [-1, -2], True)
 
 class ConvMaxpool2d(torch.nn.Module):
     def __init__(self,):
@@ -70,8 +73,8 @@ def test_qmaxpool2d():
             aten_graph=True
         )
 
-        import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
-        from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
+        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+        from torch.ao.quantization.quantizer import X86InductorQuantizer
         from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
         quantizer = X86InductorQuantizer()
         operator_spec = xiq.get_default_x86_inductor_quantization_config()
@@ -95,5 +98,5 @@ def test_qmaxpool2d():
 
 
 if __name__ == "__main__":
-    #test_qmaxpool2d_op()
-    test_qmaxpool2d()
+    test_qadaptive_avg_pool2d_op()
+    #test_qadaptive_avg_pool2d()

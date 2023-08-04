@@ -20,18 +20,25 @@ torch._inductor.config.trace.debug_log = True
 
 torch._inductor.config.freezing = True
 
+import numpy as np
+import random
+local_seed = 2023
+torch.manual_seed(local_seed) # Set PyTorch seed
+np.random.seed(seed=local_seed) # Set Numpy seed
+random.seed(local_seed) # Set the Python seed
 
 class M(torch.nn.Module):
     def __init__(self, bias=True):
         super().__init__()
         self.conv = nn.Conv2d(3, 64, 7, bias=bias, stride=2, padding=3, dilation=1)
         self.relu = torch.nn.ReLU(inplace=True)
-        self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        #self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.conv2 = nn.Conv2d(64, 64, 1, bias=False, stride=1, padding=0, dilation=1)
         self.conv3 = nn.Conv2d(64, 64, 1, bias=False, stride=1, padding=0, dilation=1)
 
     def forward(self, x):
-        temp = self.maxpool(self.relu(self.conv(x)))
+        #temp = self.maxpool(self.relu(self.conv(x)))
+        temp = self.relu(self.conv(x))
         return self.conv2(temp) + self.conv3(temp)
 
 def test_qnnpack_quantizer():
@@ -39,6 +46,7 @@ def test_qnnpack_quantizer():
     use_bias = True
     m = M(bias=use_bias).eval()
     
+
     m_copy = copy.deepcopy(m)
 
     export_model, guards = torchdynamo.export(
@@ -61,8 +69,13 @@ def test_qnnpack_quantizer():
     convert_model = convert_pt2e(prepare_model)
     print("converted model is: {}".format(convert_model), flush=True)
     
+    # from torch.fx.passes.graph_drawer import FxGraphDrawer
+    # g = FxGraphDrawer(convert_model, "resnet50")
+    # g.get_dot_graph().write_svg("//home/lesliefang/pytorch_1_7_1/inductor_quant/new_frontend_rn50_prepare.svg")
+
     with torch.no_grad():
         convert_model.eval()
+
 
         # compiler_model = torch.compile(convert_model)
         # compiler_model = compile_fx(convert_model, example_inputs)
@@ -79,6 +92,7 @@ def test_qnnpack_quantizer():
         # print("out_comp is: {}".format(out_comp), flush=True)
         # print("out_eager[0] is: {}".format(out_eager[0]), flush=True)
 
+        print(out_eager[0].size())
         # self.assertEqual(out_eager[0], out_comp, atol=5e-2, rtol=5e-2)
         print(torch.allclose(out_eager[0], out_comp, atol=5e-2, rtol=5e-2))
 
