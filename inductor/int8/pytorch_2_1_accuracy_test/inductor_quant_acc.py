@@ -154,9 +154,139 @@ def run_model_fp32(model_name):
               .format(top1=quant_top1, top5=quant_top5))
     print("Finish fp32 test of model: {}".format(model_name), flush=True)
 
+def run_model_fx_x86_int8(model_name):
+    print("start fx x86 int8 test of model: {}".format(model_name), flush=True)
+    valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    val_loader = torch.utils.data.DataLoader(
+    datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])),
+    batch_size=50, shuffle=False,
+    num_workers=4, pin_memory=True)
+    cal_loader = copy.deepcopy(val_loader)
+    model = models.__dict__[model_name](pretrained=True).eval()
+    top1 = AverageMeter('Acc@1', ':6.2f')
+    top5 = AverageMeter('Acc@5', ':6.2f')
+    quant_top1 = AverageMeter('Acc@1', ':6.2f')
+    quant_top5 = AverageMeter('Acc@5', ':6.2f')
+    x = torch.randn(50, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+    example_inputs = (x,)
+    with torch.no_grad():
+        # Generate the FX Module
+        from torch.ao.quantization import get_default_qconfig_mapping
+        from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
+        torch.backends.quantized.engine = 'x86'
+        qconfig_mapping = get_default_qconfig_mapping('x86')
+        prepared_model = prepare_fx(model, qconfig_mapping, x)
+
+        # Calibration
+        for i, (images, _) in enumerate(cal_loader):
+            prepared_model(images)
+            if i==10: break
+        converted_model = convert_fx(prepared_model).eval()
+        # Jit Trace
+        with torch.no_grad():
+            optimized_model = torch.jit.trace(converted_model, x).eval()
+            optimized_model = torch.jit.freeze(optimized_model)
+            for _ in range(3):
+                optimized_model(x)
+
+        # Benchmark
+        for i, (images, target) in enumerate(val_loader):
+            #output = model(images)
+            #acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            #top1.update(acc1[0], images.size(0))
+            #top5.update(acc5[0], images.size(0))
+            quant_output = optimized_model(images)
+            quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
+            quant_top1.update(quant_acc1[0], images.size(0))
+            quant_top5.update(quant_acc5[0], images.size(0))
+
+            # if i % 9 == 0:
+            #     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            #         .format(i, top1=quant_top1, top5=quant_top5))                
+        print(model_name + " int8: ")
+        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+              .format(top1=quant_top1, top5=quant_top5))
+    print("Finish fx x86 int8 test of model: {}".format(model_name), flush=True)
+
+def run_model_ipex_int8(model_name):
+    print("start ipex int8 test of model: {}".format(model_name), flush=True)
+    import intel_extension_for_pytorch as ipex
+    from torch.ao.quantization import HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, QConfig
+    valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    val_loader = torch.utils.data.DataLoader(
+    datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])),
+    batch_size=50, shuffle=False,
+    num_workers=4, pin_memory=True)
+    cal_loader = copy.deepcopy(val_loader)
+    model = models.__dict__[model_name](pretrained=True).eval()
+    top1 = AverageMeter('Acc@1', ':6.2f')
+    top5 = AverageMeter('Acc@5', ':6.2f')
+    quant_top1 = AverageMeter('Acc@1', ':6.2f')
+    quant_top5 = AverageMeter('Acc@5', ':6.2f')
+    x = torch.randn(50, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+    example_inputs = (x,)
+    with torch.no_grad():
+        # Generate the FX Module
+        # qconfig = QConfig(
+        #         activation=MinMaxObserver.with_args(qscheme=torch.per_tensor_symmetric, dtype=torch.qint8),
+        #         weight= PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric))
+        qconfig = QConfig(
+                activation=HistogramObserver.with_args(qscheme=torch.per_tensor_affine, dtype=torch.quint8),
+                weight= PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric))
+        prepared_model = ipex.quantization.prepare(model, qconfig, x, inplace=True)
+
+        # Calibration
+        for i, (images, _) in enumerate(cal_loader):
+            prepared_model(images.contiguous(memory_format=torch.channels_last))
+            if i==10: break
+        converted_model = ipex.quantization.convert(prepared_model).eval()
+        # Jit Trace
+        with torch.no_grad():
+            optimized_model = torch.jit.trace(converted_model, x).eval()
+            optimized_model = torch.jit.freeze(optimized_model)
+            for _ in range(3):
+                optimized_model(x)
+
+        # Benchmark
+        for i, (images, target) in enumerate(val_loader):
+            #output = model(images)
+            #acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            #top1.update(acc1[0], images.size(0))
+            #top5.update(acc5[0], images.size(0))
+            quant_output = optimized_model(images.contiguous(memory_format=torch.channels_last))
+            quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
+            quant_top1.update(quant_acc1[0], images.size(0))
+            quant_top5.update(quant_acc5[0], images.size(0))
+
+            # if i % 9 == 0:
+            #     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            #         .format(i, top1=quant_top1, top5=quant_top5), flush=True)                
+        print(model_name + " int8: ")
+        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+              .format(top1=quant_top1, top5=quant_top5))
+    print("Finish ipex int8 test of model: {}".format(model_name), flush=True)
+
 if __name__ == "__main__":
     model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     # model_list = ["resnet50","squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
+    # model_list = ["squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
+    # model_list = ["resnet50",]
     for model in model_list:
-        run_model(model)
-        run_model_fp32(model)
+        # run_model(model)
+        # run_model_fp32(model)
+        # run_model_fx_x86_int8(model)
+        run_model_ipex_int8(model)
