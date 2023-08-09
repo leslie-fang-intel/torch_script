@@ -5,8 +5,8 @@ import torchvision.models as models
 import torch._dynamo as torchdynamo
 import copy
 from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
-import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
-from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+from torch.ao.quantization.quantizer import X86InductorQuantizer
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
@@ -51,7 +51,8 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 def run_model(model_name):
-    valdir = "/workspace/pt_data/val/"
+    print("start int8 test of model: {}".format(model_name), flush=True)
+    valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     val_loader = torch.utils.data.DataLoader(
@@ -100,15 +101,62 @@ def run_model(model_name):
             quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
-        #print(model_name + " fp32: ")
-        #print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-        #      .format(top1=top1, top5=top5))
+
+            # if i % 9 == 0:
+            #     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            #         .format(i, top1=quant_top1, top5=quant_top5))                
         print(model_name + " int8: ")
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=quant_top1, top5=quant_top5))
+    print("Finish int8 test of model: {}".format(model_name), flush=True)
+
+def run_model_fp32(model_name):
+    print("start fp32 test of model: {}".format(model_name), flush=True)
+    valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    val_loader = torch.utils.data.DataLoader(
+    datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])),
+    batch_size=50, shuffle=False,
+    num_workers=4, pin_memory=True)
+    cal_loader = copy.deepcopy(val_loader)
+    model = models.__dict__[model_name](pretrained=True).eval()
+    top1 = AverageMeter('Acc@1', ':6.2f')
+    top5 = AverageMeter('Acc@5', ':6.2f')
+    quant_top1 = AverageMeter('Acc@1', ':6.2f')
+    quant_top5 = AverageMeter('Acc@5', ':6.2f')
+    x = torch.randn(50, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+    example_inputs = (x,)
+    with torch.no_grad():
+        # Lower into Inductor
+        optimized_model = torch.compile(model)
+        # Benchmark
+        for i, (images, target) in enumerate(val_loader):
+            #output = model(images)
+            #acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            #top1.update(acc1[0], images.size(0))
+            #top5.update(acc5[0], images.size(0))
+            quant_output = optimized_model(images)
+            quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
+            quant_top1.update(quant_acc1[0], images.size(0))
+            quant_top5.update(quant_acc5[0], images.size(0))
+
+            # if i % 9 == 0:
+            #     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            #         .format(i, top1=quant_top1, top5=quant_top5))
+        print(model_name + " fp32: ")
+        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+              .format(top1=quant_top1, top5=quant_top5))
+    print("Finish fp32 test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
     model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
-    # model_list = []
+    # model_list = ["resnet50","squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
     for model in model_list:
         run_model(model)
+        run_model_fp32(model)
