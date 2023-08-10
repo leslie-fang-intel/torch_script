@@ -2,6 +2,8 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch._dynamo as torchdynamo
 import copy
+import operator
+from torch.ao.quantization import ObserverBase
 
 torch._dynamo.config.verbose = True
 torch._inductor.config.trace.enabled = True
@@ -30,7 +32,7 @@ def test_qmaxpool2d():
     input = torch.randn(16, 3, 16, 16).contiguous(memory_format=torch.channels_last)
     example_inputs = (input, )
     with torch.no_grad():
-        save_model = False
+        save_model = True
         if save_model:
             m = ConvMaxpool2d().eval()
             export_model, guards = torchdynamo.export(
@@ -53,13 +55,12 @@ def test_qmaxpool2d():
             prepare_model = prepare_pt2e(export_model, quantizer)
             print("prepared model is: {}".format(prepare_model), flush=True)
             prepare_model(*example_inputs)
-
             convert_model = convert_pt2e(prepare_model).eval()
             print("converted model is: {}".format(convert_model), flush=True)
 
-            torch.save(convert_model, "/home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/test_int8_op/test.pt")
+            # torch.save(convert_model, "/home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/test_int8_op/test.pt")
         
-        convert_model = torch.load("/home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/test_int8_op/test.pt").eval()
+        # convert_model = torch.load("/home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/test_int8_op/test.pt").eval()
 
         ref_res = convert_model(*example_inputs)
 
