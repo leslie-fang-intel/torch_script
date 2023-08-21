@@ -6,7 +6,7 @@ import torch._dynamo as torchdynamo
 import copy
 from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-from torch.ao.quantization.quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import random
@@ -58,10 +58,10 @@ def accuracy(output, target, topk=(1,)):
 
 def run_model(model_name):
 
-    # torch._dynamo.config.verbose = True
-    # torch._inductor.config.trace.enabled = True
-    # torch._inductor.config.trace.debug_log = True
-    # torch._inductor.config.debug = True
+    torch._dynamo.config.verbose = True
+    torch._inductor.config.trace.enabled = True
+    torch._inductor.config.trace.debug_log = True
+    torch._inductor.config.debug = True
     # torch._inductor.config.freezing = True
 
     print("start int8 test of model: {}".format(model_name), flush=True)
@@ -119,10 +119,6 @@ def run_model(model_name):
             quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
-
-            # if i % 9 == 0:
-            #     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-            #         .format(i, top1=quant_top1, top5=quant_top5), flush=True)                
         print(model_name + " int8: ")
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=quant_top1, top5=quant_top5))
@@ -200,6 +196,8 @@ def run_model_fx_x86_int8(model_name):
         from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
         torch.backends.quantized.engine = 'x86'
         qconfig_mapping = get_default_qconfig_mapping('x86')
+        # torch.backends.quantized.engine = 'onednn'
+        # qconfig_mapping = get_default_qconfig_mapping('onednn')
         prepared_model = prepare_fx(model, qconfig_mapping, x)
 
         # Calibration
@@ -213,6 +211,8 @@ def run_model_fx_x86_int8(model_name):
             optimized_model = torch.jit.freeze(optimized_model)
             for _ in range(3):
                 optimized_model(x)
+            print("---- print jit model -----", flush=True)
+            print(optimized_model.graph_for(x), flush=True)
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
@@ -301,13 +301,16 @@ def run_model_ipex_int8(model_name):
 if __name__ == "__main__":
     model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     # model_list = ["resnet50","squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
-    # model_list = ["squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
+    # model_list = ["densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
+    
     # model_list = ["shufflenet_v2_x1_0",]
+    # model_list = ["resnet50",]
+    
     import os
     os.system("rm -rf /home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/pytorch_2_1_accuracy_test/torch_compile_debug/*")
     os.system("rm -rf /tmp/torchinductor_root/*")
     for model in model_list:
         run_model(model)
-        # run_model_fp32(model)
         # run_model_fx_x86_int8(model)
+        # run_model_fp32(model)
         # run_model_ipex_int8(model)
