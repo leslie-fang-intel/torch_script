@@ -89,14 +89,20 @@ def run_model(model_name):
     example_inputs = (x,)
     with torch.no_grad():
         # Generate the FX Module
-        export_with_dynamic_shape = False
+        # export_with_dynamic_shape = False
+        # exported_model = capture_pre_autograd_graph(
+        #     model,
+        #     example_inputs,
+        #     constraints=[dynamic_dim(example_inputs[0], 0)]
+        #     if export_with_dynamic_shape
+        #     else [],
+        # )
+
         exported_model = capture_pre_autograd_graph(
             model,
-            example_inputs,
-            constraints=[dynamic_dim(example_inputs[0], 0)]
-            if export_with_dynamic_shape
-            else [],
+            example_inputs
         )
+
         # Create X86InductorQuantizer
         quantizer = X86InductorQuantizer()
         quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
@@ -315,7 +321,7 @@ if __name__ == "__main__":
     # model_list = ["densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     
     # model_list = ["shufflenet_v2_x1_0",]
-    model_list = ["alexnet"]
+    model_list = ["resnet50"]
     
     import os
     os.system("rm -rf /home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/pytorch_2_1_accuracy_test/torch_compile_debug/*")
