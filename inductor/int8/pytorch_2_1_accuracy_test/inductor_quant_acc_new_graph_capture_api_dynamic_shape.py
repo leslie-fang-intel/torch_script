@@ -64,12 +64,14 @@ def run_model(model_name):
     torch._inductor.config.trace.debug_log = True
     torch._inductor.config.debug = True
     # torch._inductor.config.freezing = True
+    torch._dynamo.config.assume_static_by_default = False
+    torch._dynamo.config.automatic_dynamic_shapes = True
 
     print("start int8 test of model: {}".format(model_name), flush=True)
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-    traced_bs = 50
+    traced_bs = 49
     val_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(valdir, transforms.Compose([
         transforms.Resize(256),
@@ -119,7 +121,7 @@ def run_model(model_name):
         converted_model = convert_pt2e(prepared_model).eval()
         # print("converted_model is: {}".format(converted_model), flush=True)
         # Lower into Inductor
-        optimized_model = torch.compile(converted_model)
+        optimized_model = torch.compile(converted_model, dynamic=True)
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
