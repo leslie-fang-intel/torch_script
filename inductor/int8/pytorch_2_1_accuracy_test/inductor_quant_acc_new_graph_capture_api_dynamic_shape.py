@@ -71,7 +71,7 @@ def run_model(model_name):
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-    traced_bs = 49
+    traced_bs = 50
     val_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(valdir, transforms.Compose([
         transforms.Resize(256),
@@ -104,6 +104,8 @@ def run_model(model_name):
             model,
             example_inputs
         )
+
+        # print("exported_model is: {}".format(exported_model), flush=True)
 
         # Create X86InductorQuantizer
         quantizer = X86InductorQuantizer()
@@ -318,12 +320,12 @@ def run_model_ipex_int8(model_name):
     print("Finish ipex int8 test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
-    model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
+    # model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     # model_list = ["resnet50","squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
-    # model_list = ["densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
+    # model_list = ["mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet152","resnet18","resnext50_32x4d"]
     
     # model_list = ["shufflenet_v2_x1_0",]
-    model_list = ["resnet50"]
+    model_list = ["shufflenet_v2_x1_0"]
     
     import os
     os.system("rm -rf /home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/pytorch_2_1_accuracy_test/torch_compile_debug/*")
