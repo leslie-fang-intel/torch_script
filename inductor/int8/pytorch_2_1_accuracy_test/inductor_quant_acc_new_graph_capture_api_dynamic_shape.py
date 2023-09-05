@@ -64,6 +64,8 @@ def run_model(model_name):
     torch._inductor.config.trace.debug_log = True
     torch._inductor.config.debug = True
     # torch._inductor.config.freezing = True
+    torch._dynamo.config.assume_static_by_default = False
+    torch._dynamo.config.automatic_dynamic_shapes = True
 
     print("start int8 test of model: {}".format(model_name), flush=True)
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
@@ -103,6 +105,8 @@ def run_model(model_name):
             example_inputs
         )
 
+        # print("exported_model is: {}".format(exported_model), flush=True)
+
         # Create X86InductorQuantizer
         quantizer = X86InductorQuantizer()
         quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
@@ -119,7 +123,7 @@ def run_model(model_name):
         converted_model = convert_pt2e(prepared_model).eval()
         # print("converted_model is: {}".format(converted_model), flush=True)
         # Lower into Inductor
-        optimized_model = torch.compile(converted_model)
+        optimized_model = torch.compile(converted_model, dynamic=True)
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
@@ -316,12 +320,12 @@ def run_model_ipex_int8(model_name):
     print("Finish ipex int8 test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
-    model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
+    # model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     # model_list = ["resnet50","squeezenet1_1","mobilenet_v2","mobilenet_v3_large"]
-    # model_list = ["densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
+    # model_list = ["mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet152","resnet18","resnext50_32x4d"]
     
     # model_list = ["shufflenet_v2_x1_0",]
-    model_list = ["resnet50"]
+    model_list = ["shufflenet_v2_x1_0"]
     
     import os
     os.system("rm -rf /home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/pytorch_2_1_accuracy_test/torch_compile_debug/*")
