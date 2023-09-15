@@ -97,7 +97,6 @@ def run_model(model_name):
         #     if export_with_dynamic_shape
         #     else [],
         # )
-
         exported_model = capture_pre_autograd_graph(
             model,
             example_inputs
@@ -116,7 +115,8 @@ def run_model(model_name):
         for i, (images, _) in enumerate(cal_loader):
             prepared_model(images)
             if i==10: break
-        converted_model = convert_pt2e(prepared_model).eval()
+        converted_model = convert_pt2e(prepared_model)
+        torch.ao.quantization.move_exported_model_to_eval(converted_model)
         # print("converted_model is: {}".format(converted_model), flush=True)
         # Lower into Inductor
         optimized_model = torch.compile(converted_model)
