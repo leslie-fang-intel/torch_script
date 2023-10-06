@@ -6,7 +6,6 @@ import torch._dynamo as torchdynamo
 import copy
 from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-from torch.ao.quantization.quantizer import X86InductorQuantizer
 import time
 
 def run_rn50():
@@ -22,13 +21,13 @@ def run_rn50():
             aten_graph=True,
         )
         # Create X86InductorQuantizer
-        quantizer = X86InductorQuantizer()
+        quantizer = xiq.X86InductorQuantizer()
         quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
         # PT2E Quantization flow
         prepared_model = prepare_pt2e(exported_model, quantizer)
         # Calibration
         prepared_model(*example_inputs)
-        converted_model = convert_pt2e(prepared_model).eval()
+        converted_model = convert_pt2e(prepared_model)
         # Lower into Inductor
         optimized_model = torch.compile(converted_model)
         # Benchmark
