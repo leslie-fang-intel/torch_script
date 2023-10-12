@@ -1,3 +1,6 @@
+# CMD: TORCHINDUCTOR_FREEZING=1 numactl -C 0-31 -m 0 python test_jira_MLDL_836.py
+# Config: TORCH_COMPILE_DEBUG=1 TORCH_LOGS="+schedule,+inductor,+output_code" 
+
 import torch.quantization.quantize_fx as quantize_fx
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, convert_to_reference_fx, prepare_qat_fx
 import copy
@@ -7,6 +10,10 @@ import torch
 import time
 import numpy as np
 import os
+from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
+from torch._export import capture_pre_autograd_graph, dynamic_dim
 
 def draw_graph(model,data,graph_name):
     model.eval()
@@ -64,9 +71,14 @@ def Test_ipex_QATint8(model,input):
         y = model_ipex(data)
     model_ipex.eval()
 
+    warm_loop = 50
+    loop = 150
     times =[]
     with torch.no_grad():
-        for _ in range(20):
+        for _ in range(warm_loop):
+            _ = model_ipex(data)
+
+        for _ in range(loop):
             start_time = time.time()
             output = model_ipex(data)
             end_time = time.time()
@@ -113,10 +125,16 @@ def ipex_infer_int8(model,data):
         y = traced_model(data)
         y = traced_model(data)
 
-    loop = 20
+    warm_loop = 50
+    loop = 150
     times = []
 
     with torch.no_grad():
+        for _ in range(warm_loop):
+            _ = traced_model(data)
+
+        print("finish warm up", flush=True)
+
         for _ in range(loop):
             start_time = time.time()
             output = traced_model(data)
@@ -131,19 +149,89 @@ def ipex_infer_int8(model,data):
             out = traced_model(data)
         print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1)) 
 
+def inductor_ptq_infer_int8(model,data):
+    ######   
+    iter_print = 0
+    prof = 1
+    if prof:
+        torch._inductor.config.cpp.enable_kernel_profile=True
+        torch._inductor.config.profiler_mark_wrapper_call = True
+    loop = 20
+
+    model = model.eval()
+
+    # qconfig = QConfig(activation=MinMaxObserver.with_args(qscheme=torch.per_tensor_affine, dtype=torch.quint8),
+    #     weight=PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric))    
+    
+    data = data.to(memory_format=torch.channels_last)
+    
+    exported_model = capture_pre_autograd_graph(
+        model,
+        (data,)
+    )
+
+    # Create X86InductorQuantizer
+    quantizer = X86InductorQuantizer()
+    quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+    # PT2E Quantization flow
+    with torch.no_grad():
+        prepared_model = prepare_pt2e(exported_model, quantizer)
+        #xx_c = [torch.randn(1, 3, 224, 224) for i in range(10)]
+        xx_c = [torch.randn(data.shape).to(memory_format=torch.channels_last) for i in range(10)]    
+
+        prepared_model(data)
+
+        converted_model = convert_pt2e(prepared_model)
+        torch.ao.quantization.move_exported_model_to_eval(converted_model)
+
+        optimized_model = torch.compile(converted_model)
+
+    with torch.no_grad():
+        for x in xx_c:
+            y = optimized_model(x)
+
+    
+    times = []
+
+    warm_loop = 50
+    loop = 150
+    times = []
+
+    with torch.no_grad():
+        for _ in range(warm_loop):
+            _ = optimized_model(data)
+        
+        print("finish warm up", flush=True)
+
+        for _ in range(loop):
+            start_time = time.time()
+            output = optimized_model(data)
+            end_time = time.time()
+            times.append(end_time - start_time)
+            if iter_print:
+                print('time: %0.3f ms ' % ((end_time - start_time) * 1000.0))
+        print ('Average latency: %0.3f ms.' % (np.median(times) * 1000.0), flush=True)
+        print ('throughput: %0.3f fps.' % (data.size(0) / np.median(times)), flush=True)
+
+        if prof:
+            # with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as p:
+            with torch.profiler.profile(on_trace_ready=torch.profiler.tensorboard_trace_handler("./int8_log")) as prof:
+                out = optimized_model(data)
+            # print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1))
+            print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+
 if __name__ == "__main__":
 
-    data = torch.randn(1, 3, 224, 224)
+    data = torch.randn(64, 3, 224, 224)
     model_fp = torchvision.models.resnet50(pretrained=True)
-
     
+    # print("--------------ipex PTQ -----------")
+    # ipex_infer_int8(model_fp,data)   
 
-    
-    print("--------------ipex PTQ -----------")
-    ipex_infer_int8(model_fp,data)   
-    
+    # print("-------------- PyTorch 1.X QAT-----------")
+    # model_quantized=quant_fx(model_fp,data)
+    # print("--------------Ipex QAT-----------")          
+    # Test_ipex_QATint8(model_quantized,data)
 
-    print("--------------QAT-----------")
-    model_quantized=quant_fx(model_fp,data)
-    print("--------------Ipex QAT-----------")          
-    Test_ipex_QATint8(model_quantized,data)
+    print("--------------inductor PTQ -----------")
+    inductor_ptq_infer_int8(model_fp,data)
