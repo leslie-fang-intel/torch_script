@@ -10,10 +10,16 @@ import torch
 import time
 import numpy as np
 import os
-from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
+from torch.ao.quantization.quantize_pt2e import prepare_pt2e, prepare_qat_pt2e, convert_pt2e
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch._export import capture_pre_autograd_graph, dynamic_dim
+
+torch._inductor.config.freezing = True
+# torch._dynamo.config.verbose = True
+# torch._inductor.config.trace.enabled = True
+# torch._inductor.config.trace.debug_log = True
+# torch._inductor.config.debug = True
 
 def draw_graph(model,data,graph_name):
     model.eval()
@@ -220,6 +226,83 @@ def inductor_ptq_infer_int8(model,data):
             # print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1))
             print(prof.key_averages().table(sort_by="self_cpu_time_total"))
 
+def inductor_qat_infer_int8(model,data):
+    ######   
+    iter_print = 0
+    prof = 1
+    if prof:
+        torch._inductor.config.cpp.enable_kernel_profile=True
+        torch._inductor.config.profiler_mark_wrapper_call = True
+    loop = 20
+
+    data = data.to(memory_format=torch.channels_last)
+    
+    exported_model = capture_pre_autograd_graph(
+        model,
+        (data,)
+    )
+    print("---- finish the graph capture ----", flush=True)
+
+    # Create X86InductorQuantizer
+    quantizer = X86InductorQuantizer()
+    quantizer.set_global(xiq.get_default_x86_inductor_quantization_config(is_qat=True))
+    # PT2E Quantization flow
+    with torch.no_grad():
+        print("---- start prepare_qat_pt2e ----", flush=True)
+        prepared_model = prepare_qat_pt2e(exported_model, quantizer)
+        print("---- finish prepare_qat_pt2e ----", flush=True)
+        #xx_c = [torch.randn(1, 3, 224, 224) for i in range(10)]
+        xx_c = [torch.randn(data.shape).to(memory_format=torch.channels_last) for i in range(10)]    
+
+        # QAT Training
+        prepared_model(data)
+
+        print("---- start convert_pt2e ----", flush=True)
+        converted_model = convert_pt2e(prepared_model)
+        print("---- finish convert_pt2e ----", flush=True)
+        torch.ao.quantization.move_exported_model_to_eval(converted_model)
+
+        print("converted_model is: {}".format(converted_model), flush=True)
+
+        print("---- start torch.compile ----", flush=True)
+        optimized_model = torch.compile(converted_model)
+        print("---- finish torch.compile ----", flush=True)
+    
+    times = []
+
+    warm_loop = 50
+    loop = 150
+    times = []
+
+    with torch.no_grad():
+        print("---- start warm up", flush=True)
+
+        for warm_step in range(warm_loop):
+            print("---- start warm_step is: {}".format(warm_step), flush=True)
+            _ = optimized_model(data)
+            print("---- finish warm_step is: {}".format(warm_step), flush=True)
+        
+        print("---- finish warm up", flush=True)
+
+        for step in range(loop):
+            print("---- start step is: {}".format(step), flush=True)
+            start_time = time.time()
+            output = optimized_model(data)
+            end_time = time.time()
+            print("---- finish step is: {}".format(step), flush=True)
+            times.append(end_time - start_time)
+            if iter_print:
+                print('time: %0.3f ms ' % ((end_time - start_time) * 1000.0))
+        print ('Average latency: %0.3f ms.' % (np.median(times) * 1000.0), flush=True)
+        print ('throughput: %0.3f fps.' % (data.size(0) / np.median(times)), flush=True)
+
+        if prof:
+            # with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as p:
+            with torch.profiler.profile(on_trace_ready=torch.profiler.tensorboard_trace_handler("./int8_log")) as prof:
+                out = optimized_model(data)
+            # print(p.key_averages().table(sort_by="self_cpu_time_total", row_limit=-1))
+            print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+
 if __name__ == "__main__":
 
     data = torch.randn(64, 3, 224, 224)
@@ -233,5 +316,8 @@ if __name__ == "__main__":
     # print("--------------Ipex QAT-----------")          
     # Test_ipex_QATint8(model_quantized,data)
 
-    print("--------------inductor PTQ -----------")
-    inductor_ptq_infer_int8(model_fp,data)
+    # print("--------------inductor PTQ -----------")
+    # inductor_ptq_infer_int8(model_fp,data)
+
+    print("--------------inductor QAT -----------")
+    inductor_qat_infer_int8(model_fp,data)
