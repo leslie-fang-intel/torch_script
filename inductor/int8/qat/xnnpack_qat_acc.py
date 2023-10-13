@@ -1,17 +1,17 @@
-# Execution Command:
-# TORCHINDUCTOR_FREEZING=1 python inductor_quant_acc.py
+# Execution Command: python inductor_qat_acc.py
 import torch
 import torchvision.models as models
-import torch._dynamo as torchdynamo
 import copy
-from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e, prepare_qat_pt2e
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_qat_pt2e
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import random
 import numpy as np
-from torch._export import capture_pre_autograd_graph, dynamic_dim
+from torch._export import capture_pre_autograd_graph
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    get_symmetric_quantization_config,
+    XNNPACKQuantizer,
+)
 
 random.seed(2023)
 torch.manual_seed(2023)
@@ -58,15 +58,7 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 def run_qat_model(model_name):
-
-    torch._dynamo.config.verbose = True
-    torch._inductor.config.trace.enabled = True
-    torch._inductor.config.trace.debug_log = True
-    torch._inductor.config.debug = True
-    # torch._inductor.config.freezing = True
-
-    print("start int8 qat test of model: {}".format(model_name), flush=True)
-    # valdir = "/localdisk/imagenet/val/"
+    print("start int8 pt2e QAT test of model: {}".format(model_name), flush=True)
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -80,8 +72,7 @@ def run_qat_model(model_name):
     ])),
     batch_size=traced_bs, shuffle=False,
     num_workers=4, pin_memory=True)
-    
-    
+
     traindir = "/home/dlboostbkc/dataset/Pytorch/train/"
     train_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(traindir, transforms.Compose([
@@ -98,25 +89,24 @@ def run_qat_model(model_name):
     model = models.__dict__[model_name](pretrained=True).train()
     quant_top1 = AverageMeter('Acc@1', ':6.2f')
     quant_top5 = AverageMeter('Acc@5', ':6.2f')
-    x = torch.randn(traced_bs, 3, 224, 224).contiguous(memory_format=torch.channels_last)
-    example_inputs = (x,)
 
-    exported_model = capture_pre_autograd_graph(
-        model,
-        example_inputs
+    for i, (images, _) in enumerate(cal_loader):
+        print("start to capture the graph", flush=True)
+        images = images.to(memory_format=torch.channels_last)
+        exported_model = capture_pre_autograd_graph(
+            model,
+            (images,)
+        )
+        break
+
+    quantizer = XNNPACKQuantizer()
+    quantizer.set_global(
+        get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
     )
-
-    # Create X86InductorQuantizer
-    quantizer = X86InductorQuantizer()
-    quantizer.set_global(xiq.get_default_x86_inductor_quantization_config(is_qat=True))
     # PT2E Quantization flow
     print("---- start prepare_qat_pt2e ----", flush=True)
     prepared_model = prepare_qat_pt2e(exported_model, quantizer)
-    print("prepared_model is: {}".format(prepared_model), flush=True)
-    # from torch.fx.passes.graph_drawer import FxGraphDrawer
-    # g = FxGraphDrawer(prepared_model, "shuffnetv2")
-    # g.get_dot_graph().write_svg("//home/lesliefang/pytorch_1_7_1/inductor_quant/torch_script/inductor/int8/pytorch_2_1_accuracy_test/new_frontend_shuffnetv2_prepare.svg")
-    
+ 
     # QAT
     for i, (images, _) in enumerate(cal_loader):
         print(" start QAT Calibration step: {}".format(i), flush=True)
@@ -128,11 +118,9 @@ def run_qat_model(model_name):
         print("---- start convert_pt2e ----", flush=True)
         converted_model = convert_pt2e(prepared_model)
         torch.ao.quantization.move_exported_model_to_eval(converted_model)
+        
         print("converted_model is: {}".format(converted_model), flush=True)
-
-        # Lower into Inductor
-        optimized_model = torch.compile(converted_model)
-        # optimized_model = converted_model
+        optimized_model = converted_model
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
@@ -151,10 +139,9 @@ def run_qat_model(model_name):
         print(model_name + " int8: ")
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
             .format(top1=quant_top1, top5=quant_top5))
-    print("Finish int8 QAT test of model: {}".format(model_name), flush=True)
+    print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
-    # model_list=["alexnet","shufflenet_v2_x1_0","mobilenet_v3_large","vgg16","densenet121","mnasnet1_0","squeezenet1_1","mobilenet_v2","resnet50","resnet152","resnet18","resnext50_32x4d"]
     model_list = ["resnet50"]
     
     for model in model_list:
