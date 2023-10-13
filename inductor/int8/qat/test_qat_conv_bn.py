@@ -52,12 +52,22 @@ def inductor_qat_infer_int8(model,data):
         # QAT Training
         prepared_model(data)
 
+        print("prepared_model is: {}".format(prepared_model), flush=True)
+        from torch.fx.passes.graph_drawer import FxGraphDrawer
+        g = FxGraphDrawer(prepared_model, "rn50_qat_prepare")
+        g.get_dot_graph().write_svg("/home/leslie/quantization/torch_script/inductor/int8/qat/rn50_qat_prepare.svg")
+
         print("---- start convert_pt2e ----", flush=True)
         converted_model = convert_pt2e(prepared_model)
         print("---- finish convert_pt2e ----", flush=True)
         torch.ao.quantization.move_exported_model_to_eval(converted_model)
 
+        g = FxGraphDrawer(converted_model, "rn50_qat")
+        g.get_dot_graph().write_svg("//home/leslie/quantization/torch_script/inductor/int8/qat/rn50_qat_convert.svg")
+
         print("converted_model is: {}".format(converted_model), flush=True)
+
+        # exit(-1)
 
         print("---- start torch.compile ----", flush=True)
         optimized_model = torch.compile(converted_model)
@@ -65,8 +75,8 @@ def inductor_qat_infer_int8(model,data):
     
     times = []
 
-    warm_loop = 3
-    loop = 5
+    warm_loop = 50
+    loop = 150
     times = []
 
     with torch.no_grad():
@@ -117,6 +127,24 @@ def inductor_qat_infer_int8(model,data):
 #     def forward(self, x):
 #         return self.conv(x) + self.relu(x)
 
+class Conv2dAddReLUModule(torch.nn.Module):
+    def __init__(self,
+                    inplace_add: bool = False,
+                    use_bias: bool = False,
+                    inplace_relu: bool = False,
+                    ) -> None:
+        super().__init__()
+        self.conv = torch.nn.Conv2d(
+            in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+        )
+        self.bn = torch.nn.BatchNorm2d(3)
+        self.relu = torch.nn.ReLU()
+        self.inplace_add = inplace_add
+        self.relu2 = torch.nn.ReLU(inplace=inplace_relu)
+
+    def forward(self, x):
+        return self.relu2(self.bn(self.conv(x)) + self.relu(x))
+
 class Conv2dAddModule(torch.nn.Module):
     def __init__(self,
                     inplace_add: bool = False,
@@ -128,12 +156,18 @@ class Conv2dAddModule(torch.nn.Module):
         )
         self.bn = torch.nn.BatchNorm2d(3)
         self.relu = torch.nn.ReLU()
+        self.inplace_add = inplace_add
 
     def forward(self, x):
-        return self.bn(self.conv(x)) + self.relu(x)
+        if self.inplace_add:
+            tmp = self.bn(self.conv(x))
+            tmp += self.relu(x)
+            return tmp
+        else:
+            return self.bn(self.conv(x)) + self.relu(x)
 
 class ConvWithBNRelu(torch.nn.Module):
-    def __init__(self, relu, dim=2, bn=True, bias=True):
+    def __init__(self, relu, dim=2, bn=True, bias=False):
         super().__init__()
         convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
         bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
@@ -154,7 +188,7 @@ class ConvWithBNRelu(torch.nn.Module):
         return self.relu(x)
 
 class ConvWithBN(torch.nn.Module):
-    def __init__(self, dim=2, bn=True, bias=True):
+    def __init__(self, dim=2, bn=True, bias=False):
         super().__init__()
         convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
         bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
@@ -170,13 +204,22 @@ if __name__ == "__main__":
 
     data = torch.randn(64, 3, 224, 224)
     
-    # model_fp = torchvision.models.resnet50(pretrained=True)
+    # RN50
+    model_fp = torchvision.models.resnet50(pretrained=True)
 
+    # ConvBN
     # model_fp = ConvWithBN()
-    # model_fp = ConvWithBNRelu(relu=True)
-    model_fp = Conv2dAddModule()
 
-    # model_fp(data)
+    # ConvBNReLU
+    # model_fp = ConvWithBNRelu(relu=True)
+    
+    # ConvBNAdd
+    # model_fp = Conv2dAddModule(inplace_add=False)
+    # model_fp = Conv2dAddModule(inplace_add=True)
+
+    # ConvBNAddReLU
+    # model_fp = Conv2dAddReLUModule(inplace_relu=False)
+    # model_fp = Conv2dAddReLUModule(inplace_relu=True)
 
 
     print("--------------inductor QAT -----------")
