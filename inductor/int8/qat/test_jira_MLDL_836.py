@@ -103,14 +103,14 @@ def ipex_infer_int8(model,data):
     ######
     import intel_extension_for_pytorch as ipex
     from intel_extension_for_pytorch.quantization import prepare, convert
-    from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver, QConfig    
+    from torch.ao.quantization import HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, QConfig    
     iter_print = 0
     prof = 1
-    loop = 20
+
 
     model = model.eval()
 
-    qconfig = QConfig(activation=MinMaxObserver.with_args(qscheme=torch.per_tensor_affine, dtype=torch.quint8),
+    qconfig = QConfig(activation=HistogramObserver.with_args(qscheme=torch.per_tensor_affine, dtype=torch.quint8),
         weight=PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric))    
 
     #xx_c = [torch.randn(1, 3, 224, 224) for i in range(10)]
@@ -120,9 +120,7 @@ def ipex_infer_int8(model,data):
         for x in xx_c:
             y = model(x)
 
-
     data = data.to(memory_format=torch.channels_last)
-    times = []
 
     with torch.no_grad():
         convert_model = convert(prepared_model)
@@ -149,6 +147,7 @@ def ipex_infer_int8(model,data):
             if iter_print:
                 print('time: %0.3f ms ' % ((end_time - start_time) * 1000.0))
         print ('Average latency: %0.3f ms.' % (np.median(times) * 1000.0))
+        print ('throughput: %0.3f fps.' % (data.size(0) / np.median(times)), flush=True)
 
     if prof:
         with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as p:
@@ -162,7 +161,6 @@ def inductor_ptq_infer_int8(model,data):
     if prof:
         torch._inductor.config.cpp.enable_kernel_profile=True
         torch._inductor.config.profiler_mark_wrapper_call = True
-    loop = 20
 
     model = model.eval()
 
@@ -195,9 +193,6 @@ def inductor_ptq_infer_int8(model,data):
     with torch.no_grad():
         for x in xx_c:
             y = optimized_model(x)
-
-    
-    times = []
 
     warm_loop = 50
     loop = 150
@@ -305,7 +300,7 @@ def inductor_qat_infer_int8(model,data):
 
 if __name__ == "__main__":
 
-    data = torch.randn(64, 3, 224, 224)
+    data = torch.randn(112, 3, 224, 224)
     model_fp = torchvision.models.resnet50(pretrained=True)
     
     # print("--------------ipex PTQ -----------")
@@ -316,8 +311,8 @@ if __name__ == "__main__":
     # print("--------------Ipex QAT-----------")          
     # Test_ipex_QATint8(model_quantized,data)
 
-    # print("--------------inductor PTQ -----------")
-    # inductor_ptq_infer_int8(model_fp,data)
+    print("--------------inductor PTQ -----------")
+    inductor_ptq_infer_int8(model_fp,data)
 
-    print("--------------inductor QAT -----------")
-    inductor_qat_infer_int8(model_fp,data)
+    # print("--------------inductor QAT -----------")
+    # inductor_qat_infer_int8(model_fp,data)
