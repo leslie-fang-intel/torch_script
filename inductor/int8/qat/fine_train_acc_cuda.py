@@ -113,22 +113,22 @@ def run_qat_model(model_name):
 
 
     
-    for i, (images, _) in enumerate(cal_loader):
-        print("start to capture the graph", flush=True)
-        images = images.cuda()
-        exported_model = capture_pre_autograd_graph(
-            model,
-            (images,)
-        )
-        break
+    # for i, (images, _) in enumerate(cal_loader):
+    #     print("start to capture the graph", flush=True)
+    #     images = images.to(memory_format=torch.channels_last).cuda()
+    #     exported_model = capture_pre_autograd_graph(
+    #         model,
+    #         (images,)
+    #     )
+    #     break
 
-    quantizer = XNNPACKQuantizer()
-    quantizer.set_global(
-        get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
-    )
-    # PT2E Quantization flow
-    print("---- start prepare_qat_pt2e ----", flush=True)
-    prepared_model = prepare_qat_pt2e(exported_model, quantizer)
+    # quantizer = XNNPACKQuantizer()
+    # quantizer.set_global(
+    #     get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
+    # )
+    # # PT2E Quantization flow
+    # print("---- start prepare_qat_pt2e ----", flush=True)
+    # prepared_model = prepare_qat_pt2e(exported_model, quantizer)
  
     # for n in prepared_model.graph.nodes:
     #     if n.target == torch.ops.aten._native_batch_norm_legit.default:
@@ -136,26 +136,26 @@ def run_qat_model(model_name):
     # prepared_model.recompile()
 
     lr = 0.1 if not pretrained else 0.0001
-    total_epoch = 100 if not pretrained else 1 
     momentum = 0.9
     weight_decay = 1e-4
-    optimizer = torch.optim.SGD(prepared_model.parameters(), lr,
+    optimizer = torch.optim.SGD(model.parameters(), lr,
                                 momentum=momentum,
                                 weight_decay=weight_decay)
     optimizer.zero_grad()
     criterion = torch.nn.CrossEntropyLoss().cuda()
 
     # QAT
-    for epoch in range(total_epoch):
+    for epoch in range(100):
         print("start epoch: {}".format(epoch), flush=True)
         
         adjust_learning_rate(optimizer, epoch, lr)
+
     
         for i, (images, target) in enumerate(train_loader):
             # print(" start QAT Calibration step: {}".format(i), flush=True)
             images = images.cuda()
             target = target.cuda()
-            output = prepared_model(images)
+            output = model(images)
             loss = criterion(output, target)
             optimizer.zero_grad()
             loss.backward()
@@ -169,27 +169,26 @@ def run_qat_model(model_name):
                 .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)       
             print('avg step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                 .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)  
-            
-            if i == 1:
-                break
+        # if i==999: break
 
+    exit(-1)
     with torch.no_grad():
-        print("---- start convert_pt2e ----", flush=True)
-        converted_model = convert_pt2e(prepared_model)
-        torch.ao.quantization.move_exported_model_to_eval(converted_model)
+        # print("---- start convert_pt2e ----", flush=True)
+        # converted_model = convert_pt2e(prepared_model)
+        # torch.ao.quantization.move_exported_model_to_eval(converted_model)
         
-        print("converted_model is: {}".format(converted_model), flush=True)
-        optimized_model = converted_model
+        # print("converted_model is: {}".format(converted_model), flush=True)
+        # optimized_model = converted_model
 
-        # optimized_model = model
+        optimized_model = model
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
-            images = images.to(memory_format=torch.channels_last).cuda()
+            images = images.to(memory_format=torch.channels_last)
 
             quant_output = optimized_model(images)
 
-            quant_acc1, quant_acc5 = accuracy(quant_output, target.cuda(), topk=(1, 5))
+            quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
 
