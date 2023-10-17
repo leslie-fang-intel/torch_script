@@ -164,10 +164,10 @@ def run_model_training(model_name):
                     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                         .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
 
-            print(model_name + " int8: ")
+            print(model_name + " training: ")
             print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                 .format(top1=quant_top1, top5=quant_top5))
-    print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
+    print("Finish training of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
     model_list = ["resnet50"]
