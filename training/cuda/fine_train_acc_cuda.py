@@ -1,4 +1,5 @@
-# Execution Command: python inductor_qat_acc.py
+# Execution Command: python fine_train_acc_cuda.py
+# Val accuracy after fine training:  * Acc@1 77.048 Acc@5 93.400 
 import torch
 import torchvision.models as models
 import copy
@@ -66,8 +67,8 @@ def adjust_learning_rate(optimizer, epoch, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-def run_qat_model(model_name):
-    print("start int8 pt2e QAT test of model: {}".format(model_name), flush=True)
+def run_model_training(model_name):
+    print("start training of model: {}".format(model_name), flush=True)
     valdir = "/home/t/leslie/imagenet/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -96,44 +97,15 @@ def run_qat_model(model_name):
     pin_memory=True,
     sampler=None)
 
-    cal_loader = copy.deepcopy(train_loader)
-
-    # model = models.__dict__[model_name](pretrained=True).train()
-
     pretrained=True
 
     model = models.__dict__[model_name](pretrained=pretrained)
-
     model = model.cuda().train()
 
     quant_qat_top1 = AverageMeter('Acc@1', ':6.2f')
     quant_qat_top5 = AverageMeter('Acc@5', ':6.2f')
     quant_top1 = AverageMeter('Acc@1', ':6.2f')
     quant_top5 = AverageMeter('Acc@5', ':6.2f')
-
-
-    
-    # for i, (images, _) in enumerate(cal_loader):
-    #     print("start to capture the graph", flush=True)
-    #     images = images.to(memory_format=torch.channels_last).cuda()
-    #     exported_model = capture_pre_autograd_graph(
-    #         model,
-    #         (images,)
-    #     )
-    #     break
-
-    # quantizer = XNNPACKQuantizer()
-    # quantizer.set_global(
-    #     get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
-    # )
-    # # PT2E Quantization flow
-    # print("---- start prepare_qat_pt2e ----", flush=True)
-    # prepared_model = prepare_qat_pt2e(exported_model, quantizer)
- 
-    # for n in prepared_model.graph.nodes:
-    #     if n.target == torch.ops.aten._native_batch_norm_legit.default:
-    #         n.target = torch.ops.aten.cudnn_batch_norm.default
-    # prepared_model.recompile()
 
     lr = 0.1 if not pretrained else 0.0001
     momentum = 0.9
@@ -144,13 +116,14 @@ def run_qat_model(model_name):
     optimizer.zero_grad()
     criterion = torch.nn.CrossEntropyLoss().cuda()
 
-    # QAT
-    for epoch in range(100):
+    train_epoch = 100 if not pretrained else 1
+
+    # Training
+    for epoch in range(train_epoch):
         print("start epoch: {}".format(epoch), flush=True)
         
         adjust_learning_rate(optimizer, epoch, lr)
 
-    
         for i, (images, target) in enumerate(train_loader):
             # print(" start QAT Calibration step: {}".format(i), flush=True)
             images = images.cuda()
@@ -171,39 +144,34 @@ def run_qat_model(model_name):
                 .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)  
         # if i==999: break
 
-    exit(-1)
-    with torch.no_grad():
-        # print("---- start convert_pt2e ----", flush=True)
-        # converted_model = convert_pt2e(prepared_model)
-        # torch.ao.quantization.move_exported_model_to_eval(converted_model)
-        
-        # print("converted_model is: {}".format(converted_model), flush=True)
-        # optimized_model = converted_model
+    print("Finish the Fine Training", flush=True)
+    test_val_accuracy= True
 
-        optimized_model = model
+    if test_val_accuracy:
+        with torch.no_grad():
+            optimized_model = model.eval()
+            # Benchmark
+            for i, (images, target) in enumerate(val_loader):
+                images = images.to(memory_format=torch.channels_last).cuda()
 
-        # Benchmark
-        for i, (images, target) in enumerate(val_loader):
-            images = images.to(memory_format=torch.channels_last)
+                quant_output = optimized_model(images)
 
-            quant_output = optimized_model(images)
+                quant_acc1, quant_acc5 = accuracy(quant_output, target.cuda(), topk=(1, 5))
+                quant_top1.update(quant_acc1[0], images.size(0))
+                quant_top5.update(quant_acc5[0], images.size(0))
 
-            quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
-            quant_top1.update(quant_acc1[0], images.size(0))
-            quant_top5.update(quant_acc5[0], images.size(0))
+                if i % 9 == 0:
+                    print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                        .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
 
-            if i % 9 == 0:
-                print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-                    .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
-
-        print(model_name + " int8: ")
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-            .format(top1=quant_top1, top5=quant_top5))
+            print(model_name + " int8: ")
+            print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                .format(top1=quant_top1, top5=quant_top5))
     print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
     model_list = ["resnet50"]
     
     for model in model_list:
-        run_qat_model(model)
+        run_model_training(model)
 
