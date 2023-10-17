@@ -100,10 +100,6 @@ def run_training_model(model_name):
     model = models.__dict__[model_name](pretrained=pretrained)
     model = model.cuda().train()
 
-    quant_qat_top1 = AverageMeter('Acc@1', ':6.2f')
-    quant_qat_top5 = AverageMeter('Acc@5', ':6.2f')
-    quant_top1 = AverageMeter('Acc@1', ':6.2f')
-    quant_top5 = AverageMeter('Acc@5', ':6.2f')
 
     lr = 0.1
     momentum = 0.9
@@ -116,14 +112,17 @@ def run_training_model(model_name):
 
     train_epoch = 100 if not pretrained else 1
 
+    best_acc1 = -1
     # Traning
     for epoch in range(train_epoch):
-        print("start epoch: {}".format(epoch), flush=True)
+        print("start training epoch: {}".format(epoch), flush=True)
         
+        quant_qat_top1 = AverageMeter('Acc@1', ':6.2f')
+        quant_qat_top5 = AverageMeter('Acc@5', ':6.2f')
+
         adjust_learning_rate(optimizer, epoch, lr)
 
         for i, (images, target) in enumerate(train_loader):
-            # print(" start QAT Calibration step: {}".format(i), flush=True)
             images = images.cuda()
             target = target.cuda()
             output = model(images)
@@ -135,19 +134,56 @@ def run_training_model(model_name):
             quant_qat_acc1, quant_qat_acc5 = accuracy(output, target, topk=(1, 5))
             quant_qat_top1.update(quant_qat_acc1[0], images.size(0))
             quant_qat_top5.update(quant_qat_acc5[0], images.size(0))
-            # if i % 9 == 0:
-            print('realtime step: {}, * Acc@1 {top1.val:.3f} Acc@5 {top5.val:.3f}'
-                .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)       
-            print('avg step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-                .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)  
-            
+            if i % 49 == 0:
+                print('realtime step: {}, * Acc@1 {top1.val:.3f} Acc@5 {top5.val:.3f}'
+                    .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)       
+                print('avg step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                    .format(i, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)  
+
         #     if i==1: break
         # if epoch==0: break
 
+        print('Epoch: {}, training * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            .format(epoch, top1=quant_qat_top1, top5=quant_qat_top5), flush=True)   
+
+        if epoch > 0 and epoch % 20 == 0:
+            quant_top1 = AverageMeter('Acc@1', ':6.2f')
+            quant_top5 = AverageMeter('Acc@5', ':6.2f')
+            with torch.no_grad():
+                inference_model = copy.deepcopy(model).eval()
+                # Benchmark
+                for i, (images, target) in enumerate(val_loader):
+                    images = images.to(memory_format=torch.channels_last).cuda()
+
+                    quant_output = inference_model(images)
+                    quant_acc1, quant_acc5 = accuracy(quant_output, target.cuda(), topk=(1, 5))
+                    quant_top1.update(quant_acc1[0], images.size(0))
+                    quant_top5.update(quant_acc5[0], images.size(0))
+
+                    if i % 49 == 0:
+                        print('inference step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                            .format(i, top1=quant_top1, top5=quant_top5), flush=True) 
+
+                print('Epoch: {}, inference * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                    .format(epoch, top1=quant_top1, top5=quant_top5), flush=True)
+
+                is_best = quant_top1.avg > best_acc1
+                if is_best:
+                    best_acc1 = quant_top1.avg
+                    state = {
+                        'epoch': epoch + 1,
+                        'arch': "resnet50",
+                        'state_dict': model.state_dict(),
+                        'best_acc1': best_acc1,
+                        'optimizer' : optimizer.state_dict(),
+                    }
+                    torch.save(state, 'checkpoint.pth.tar')
+
     print("Finish the Training", flush=True)
     test_val_accuracy= True
-
     if test_val_accuracy:
+        quant_top1 = AverageMeter('Acc@1', ':6.2f')
+        quant_top5 = AverageMeter('Acc@5', ':6.2f')
         with torch.no_grad():
             optimized_model = model.eval()
             # Benchmark
@@ -159,12 +195,11 @@ def run_training_model(model_name):
                 quant_top1.update(quant_acc1[0], images.size(0))
                 quant_top5.update(quant_acc5[0], images.size(0))
 
-                if i % 9 == 0:
+                if i % 49 == 0:
                     print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                         .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
 
-            print(model_name + " training: ")
-            print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+            print('Validation * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
                 .format(top1=quant_top1, top5=quant_top5))
     print("Finish training of model: {}".format(model_name), flush=True)
 
