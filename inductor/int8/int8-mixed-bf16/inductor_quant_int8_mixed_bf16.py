@@ -63,13 +63,17 @@ def run_model(model_name):
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.trace.debug_log = True
     torch._inductor.config.debug = True
-    # torch._inductor.config.freezing = True
+    torch._inductor.config.freezing = True
 
     print("start int8 test of model: {}".format(model_name), flush=True)
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
+    
     traced_bs = 50
+    # traced_bs = 1
+
+
     val_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(valdir, transforms.Compose([
         transforms.Resize(256),
@@ -109,7 +113,9 @@ def run_model(model_name):
         # print("converted_model is: {}".format(converted_model), flush=True)
         # Lower into Inductor
 
+        # enable_int8_mixed_bf16 = False
         enable_int8_mixed_bf16 = True
+
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=enable_int8_mixed_bf16):
             optimized_model = torch.compile(converted_model)
@@ -122,9 +128,9 @@ def run_model(model_name):
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
 
-            if i % 9 == 0:
-                print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-                    .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
+            # if i % 9 == 0:
+            print('step: {}, * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                .format(i, top1=quant_top1, top5=quant_top5), flush=True)    
 
         print(model_name + " int8: ")
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
