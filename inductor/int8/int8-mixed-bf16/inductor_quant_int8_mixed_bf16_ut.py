@@ -63,17 +63,20 @@ def run_model(model_name):
     torch._inductor.config.trace.enabled = True
     torch._inductor.config.trace.debug_log = True
     torch._inductor.config.debug = True
-    # torch._inductor.config.freezing = True
+    torch._inductor.config.freezing = True
 
     class Mod(torch.nn.Module):
         def __init__(self, inplace_add=False, inplace_relu=False) -> None:
             super().__init__()
+            bias = True
+            # bias = False
+            
             self.conv = torch.nn.Conv2d(
                 # in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1
-                in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False
+                in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1, bias=bias
             )
-            self.conv2 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
-            self.conv3 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False)
+            self.conv2 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=bias)
+            self.conv3 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=bias)
             self.relu = torch.nn.ReLU(inplace=inplace_relu)
             self.relu2 = torch.nn.ReLU(inplace=inplace_relu)
 
@@ -81,7 +84,7 @@ def run_model(model_name):
             # if not self.inplace_add:
             tmp = self.conv(x)
             tmp = self.relu(tmp)
-            tmp = self.relu2(tmp)
+            #tmp = self.relu2(tmp)
             return self.conv2(tmp)
 
     model = Mod().eval()
@@ -114,12 +117,22 @@ def run_model(model_name):
         # Lower into Inductor
 
         enable_int8_mixed_bf16 = True
+        # enable_int8_mixed_bf16 = False
+
+        ref_res = converted_model(x)
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=enable_int8_mixed_bf16):
             optimized_model = torch.compile(converted_model)
 
-            for _ in range(3):
-                optimized_model(x)
+            for step in range(3):
+                print("start step: {}".format(step), flush=True)
+                res = optimized_model(x)
+        
+        if enable_int8_mixed_bf16:
+            ref_res = ref_res.to(torch.bfloat16)
+        # print("ref_res is: {}".format(ref_res), flush=True)
+        # print("res is: {}".format(res), flush=True)
+        print(torch.allclose(ref_res, res, atol=1e-2, rtol=1e-2), flush=True)
 
     print("Finish int8 test of model: {}".format(model_name), flush=True)
 
