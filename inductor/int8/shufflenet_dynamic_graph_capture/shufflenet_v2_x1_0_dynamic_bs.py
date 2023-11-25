@@ -1,4 +1,4 @@
-# Execution Command: TORCHINDUCTOR_FREEZING=1 python x86inductorquantizer_qat_acc.py
+# Execution Command: TORCHINDUCTOR_FREEZING=1 python x86inductorquantizer_qat_acc_all_models.py
 import torch
 import torchvision.models as models
 import copy
@@ -73,7 +73,7 @@ def run_qat_model(model_name):
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-    traced_bs = 50
+    traced_bs = 128
     val_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(valdir, transforms.Compose([
         transforms.Resize(256),
@@ -116,11 +116,24 @@ def run_qat_model(model_name):
     for i, (images, _) in enumerate(cal_loader):
         print("start to capture the graph", flush=True)
         images = images
+
+        from torch._export import dynamic_dim
+        export_with_dynamic_shape=True
+
         exported_model = capture_pre_autograd_graph(
             model,
-            (images,)
+            (images,),
+            constraints=[dynamic_dim(images, 0) >= 16] if export_with_dynamic_shape else [],
         )
         break
+
+    # print("exported_model is: {}".format(exported_model), flush=True)
+    # exported_model(images)
+    # print("finish step 1", flush=True)
+
+    # exported_model(images[:25])
+    # print("finish step 2", flush=True)
+    # exit(-1)
 
     quantizer = X86InductorQuantizer()
     quantizer.set_global(xiq.get_default_x86_inductor_quantization_config(is_qat=True))
@@ -184,7 +197,6 @@ def run_qat_model(model_name):
             images = images.to(memory_format=torch.channels_last)
 
             quant_output = optimized_model(images)
-
             quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
@@ -199,7 +211,21 @@ def run_qat_model(model_name):
     print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
-    model_list = ["resnet50"]
+    model_list=["alexnet",
+                "shufflenet_v2_x1_0",
+                "mobilenet_v3_large",
+                "vgg16",
+                "densenet121",
+                "mnasnet1_0",
+                "squeezenet1_1",
+                "mobilenet_v2",
+                "resnet50",
+                "resnet152",
+                "resnet18",
+                "resnext50_32x4d"
+    ]
+
+    model_list=["shufflenet_v2_x1_0"]
     
     for model in model_list:
         run_qat_model(model)

@@ -1,4 +1,4 @@
-# Execution Command: TORCHINDUCTOR_FREEZING=1 python x86inductorquantizer_qat_acc.py
+# Execution Command: TORCHINDUCTOR_FREEZING=1 python x86inductorquantizer_qat_acc_all_models.py
 import torch
 import torchvision.models as models
 import copy
@@ -116,9 +116,10 @@ def run_qat_model(model_name):
     for i, (images, _) in enumerate(cal_loader):
         print("start to capture the graph", flush=True)
         images = images
+
         exported_model = capture_pre_autograd_graph(
             model,
-            (images,)
+            (images,),
         )
         break
 
@@ -184,7 +185,6 @@ def run_qat_model(model_name):
             images = images.to(memory_format=torch.channels_last)
 
             quant_output = optimized_model(images)
-
             quant_acc1, quant_acc5 = accuracy(quant_output, target, topk=(1, 5))
             quant_top1.update(quant_acc1[0], images.size(0))
             quant_top5.update(quant_acc5[0], images.size(0))
@@ -199,7 +199,21 @@ def run_qat_model(model_name):
     print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
 
 if __name__ == "__main__":
-    model_list = ["resnet50"]
+    model_list=["alexnet",
+                "shufflenet_v2_x1_0",
+                "mobilenet_v3_large",
+                "vgg16",
+                "densenet121",
+                "mnasnet1_0",
+                "squeezenet1_1",
+                "mobilenet_v2",
+                "resnet50",
+                "resnet152",
+                "resnet18",
+                "resnext50_32x4d"
+    ]
+
+    model_list=["mnasnet1_0"]
     
     for model in model_list:
         run_qat_model(model)
