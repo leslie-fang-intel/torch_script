@@ -83,9 +83,10 @@ def run_model(model_name):
         def forward(self, x):
             # if not self.inplace_add:
             tmp = self.conv(x)
-            tmp = self.relu(tmp)
-            tmp = self.relu2(tmp)
-            return self.conv2(tmp)
+            return tmp
+            # tmp = self.relu(tmp)
+            # tmp = self.relu2(tmp)
+            # return self.conv2(tmp)
 
     model = Mod().eval()
 

@@ -9,15 +9,17 @@ import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import time
 from torch._export import capture_pre_autograd_graph, dynamic_dim
 
-torch._dynamo.config.verbose = True
-torch._inductor.config.trace.enabled = True
-torch._inductor.config.trace.debug_log = True
-torch._inductor.config.debug = True
+# torch._dynamo.config.verbose = True
+# torch._inductor.config.trace.enabled = True
+# torch._inductor.config.trace.debug_log = True
+# torch._inductor.config.debug = True
 torch._inductor.config.freezing = True
 
 def run_rn50():
     batch_size = 116
-    model = models.__dict__["resnet50"](pretrained=True).eval()
+    # model = models.__dict__["resnet50"](pretrained=True).eval()
+    model = models.__dict__["mobilenet_v2"](pretrained=True).eval()
+    
     x = torch.randn(batch_size, 3, 224, 224).contiguous(memory_format=torch.channels_last)
     example_inputs = (x,)
     with torch.no_grad():
@@ -26,6 +28,9 @@ def run_rn50():
             model,
             example_inputs
         )
+
+        print("exported_model is: {}".format(exported_model), flush=True)
+
         # Create X86InductorQuantizer
         quantizer = xiq.X86InductorQuantizer()
         quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
@@ -33,11 +38,26 @@ def run_rn50():
         prepared_model = prepare_pt2e(exported_model, quantizer)
         # Calibration
         prepared_model(*example_inputs)
+        
+        print("prepared_model is: {}".format(prepared_model), flush=True)
+        from torch.fx.passes.graph_drawer import FxGraphDrawer
+        g = FxGraphDrawer(prepared_model, "resnet50")
+        g.get_dot_graph().write_svg("/home/lesliefang/pytorch_1_7_1/quantization/prepare_model.svg")
+
+
         converted_model = convert_pt2e(prepared_model)
         torch.ao.quantization.move_exported_model_to_eval(converted_model)
 
-        # enable_int8_mixed_bf16 = False
-        enable_int8_mixed_bf16 = True
+        print("converted_model is: {}".format(converted_model), flush=True)
+
+        # from torch.fx.passes.graph_drawer import FxGraphDrawer
+        # g = FxGraphDrawer(converted_model, "resnet50")
+        # g.get_dot_graph().write_svg("./converted_model_rn50.svg")
+
+        # exit(-1)
+
+        enable_int8_mixed_bf16 = False
+        # enable_int8_mixed_bf16 = True
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=enable_int8_mixed_bf16):
             # Lower into Inductor
