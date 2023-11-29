@@ -68,7 +68,8 @@ def adjust_learning_rate(optimizer, epoch, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-def run_qat_model(model_name):
+
+def run_fine_tune_model(model_name):
     print("start int8 pt2e QAT test of model: {}".format(model_name), flush=True)
     valdir = "/home/dlboostbkc/dataset/Pytorch/val/"
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -101,22 +102,11 @@ def run_qat_model(model_name):
 
     cal_loader = copy.deepcopy(train_loader)
 
-    # model = models.__dict__[model_name](pretrained=True).train()
-
     pretrained=True
 
     model = models.__dict__[model_name](pretrained=pretrained)
 
     model = model.train()
-    
-    def _set_bn_to_eval(model):
-        if isinstance(model, torch.nn.BatchNorm2d):
-            model.eval()
-            return
-        for module in model.children():
-            _set_bn_to_eval(module)
-        return
-    _set_bn_to_eval(model)
 
     quant_qat_top1 = AverageMeter('Acc@1', ':6.2f')
     quant_qat_top5 = AverageMeter('Acc@5', ':6.2f')
@@ -129,24 +119,19 @@ def run_qat_model(model_name):
 
         exported_model = capture_pre_autograd_graph(
             model,
-            (images.contiguous(memory_format=torch.channels_last),),
+            (images,),
         )
-
         break
 
-    quantizer = X86InductorQuantizer()
-    quantizer.set_global(xiq.get_default_x86_inductor_quantization_config(is_qat=True))
-    # PT2E Quantization flow
-    print("---- start prepare_qat_pt2e ----", flush=True)
+    print("---- use XNNPACKQuantizer ----", flush=True)
+    quantizer = XNNPACKQuantizer()
+    quantizer.set_global(
+        get_symmetric_quantization_config(
+            is_per_channel=True, is_qat=True
+        )
+    )
     prepared_model = prepare_qat_pt2e(exported_model, quantizer)
-
-
-    # torch.ao.quantization.move_exported_model_to_eval(prepared_model)
  
-    # for n in prepared_model.graph.nodes:
-    #     if n.target == torch.ops.aten._native_batch_norm_legit.default:
-    #         n.target = torch.ops.aten.cudnn_batch_norm.default
-    # prepared_model.recompile()
 
     lr = 0.1 if not pretrained else 0.0001
     total_epoch = 100 if not pretrained else 1 
@@ -165,15 +150,15 @@ def run_qat_model(model_name):
         
         adjust_learning_rate(optimizer, epoch, lr)
     
-        for i, (images, target) in enumerate(cal_loader):
+        for i, (images, target) in enumerate(train_loader):
             # print(" start QAT Calibration step: {}".format(i), flush=True)
             images = images
             target = target
             output = prepared_model(images)
-            # loss = criterion(output, target)
-            # optimizer.zero_grad()
-            # loss.backward()
-            # optimizer.step()
+            loss = criterion(output, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
     
             quant_qat_acc1, quant_qat_acc5 = accuracy(output, target, topk=(1, 5))
             quant_qat_top1.update(quant_qat_acc1[0], images.size(0))
@@ -191,9 +176,8 @@ def run_qat_model(model_name):
         print("---- start convert_pt2e ----", flush=True)
         converted_model = convert_pt2e(prepared_model)
         torch.ao.quantization.move_exported_model_to_eval(converted_model)
-        
-        print("converted_model is: {}".format(converted_model), flush=True)
-        optimized_model = torch.compile(converted_model)
+
+        optimized_model = converted_model
 
         # Benchmark
         for i, (images, target) in enumerate(val_loader):
@@ -213,10 +197,13 @@ def run_qat_model(model_name):
             .format(top1=quant_top1, top5=quant_top5))
     print("Finish int8 pt2e QAT test of model: {}".format(model_name), flush=True)
 
+
+
 if __name__ == "__main__":
 
-    model_list=["mobilenet_v3_large"]
+    model_list=["mobilenet_v3_large",
+    ]
     
     for model in model_list:
-        run_qat_model(model)
+        run_fine_tune_model(model)
 
