@@ -31,11 +31,11 @@ def test_inductor_int8_conv_add_relu():
             super().__init__()
             self.conv = torch.nn.Conv2d(
                 # in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=False
+                in_channels=2, out_channels=2, kernel_size=3, stride=1, padding=1, bias=False
             )
-            self.conv2 = torch.nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=False)
-            self.conv3 = torch.nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=False)
-            self.conv4 = torch.nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=False)
+            self.conv2 = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=1, padding=1, bias=False)
+            self.conv3 = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=1, padding=1, bias=False)
+            self.conv4 = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=1, padding=1, bias=False)
             self.relu = torch.nn.ReLU()
             self.inplace_add = inplace_add
             self.use_relu = use_relu
@@ -60,7 +60,7 @@ def test_inductor_int8_conv_add_relu():
 
     torch.backends.quantized.engine = "x86"
     # example_inputs = (torch.randn(1, 1, 224, 224),)
-    inputs = (torch.randn(1, 3, 3, 3),)
+    inputs = (torch.randn(1, 2, 3, 3),)
     #m = Mod(inplace_add=True).eval()
     #for inplace_add in [True, False]:
     import itertools
@@ -107,8 +107,8 @@ def test_inductor_int8_conv_add_relu():
                 output = compiler_mode(*inputs)
                 print("output dtype is: {}".format(output.dtype), flush=True)
             
-            print(res_ref, flush=True)
-            print(output, flush=True)
+            print("res_ref is: {}".format(res_ref), flush=True)
+            print("output is: {}".format(output), flush=True)
             
             print(torch.allclose(res_ref, output, atol=1e-1, rtol=1e-1), flush=True)
 
