@@ -56,7 +56,16 @@ def test_qlinear_input_exceed_2_non_contiguous():
         _ = compiled_model(*inputs)
         _ = compiled_model(*inputs)
 
+def test_fp32_linear_input_exceed_2_non_contiguous():
+    mod = M(use_bias=False, do_permute=True)
+    inputs = (torch.randn((2, 4, 3, 4)),)
+    with torch.no_grad():
+        # mod = mod.eval()
+        compiled_model = torch.compile(mod)
+        _ = compiled_model(*inputs)
+        _ = compiled_model(*inputs)  
 
 if __name__ == "__main__":
+    # test_fp32_linear_input_exceed_2_non_contiguous()
     # test_qlinear_input_exceed_2_contiguous()
     test_qlinear_input_exceed_2_non_contiguous()
