@@ -8,6 +8,15 @@ from torch.ao.quantization.quantize_pt2e import (
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
+import numpy as np
+import random
+
+local_seed = 2024
+
+torch.manual_seed(local_seed) # Set PyTorch seed
+np.random.seed(seed=local_seed) # Set Numpy seed
+random.seed(local_seed) # Set the Python seed
+
 def _generate_qdq_quantized_model(mod, inputs, is_qat=False):
     with torch.no_grad():
         export_model = capture_pre_autograd_graph(
@@ -48,13 +57,26 @@ def test_qlinear_input_exceed_2_contiguous():
 
 
 def test_qlinear_input_exceed_2_non_contiguous():
-    mod = M(use_bias=False, do_permute=True)
-    inputs = (torch.randn((2, 4, 3, 4)),)
-    convert_model = _generate_qdq_quantized_model(mod, inputs)
-    with torch.no_grad():
-        compiled_model = torch.compile(convert_model)
-        _ = compiled_model(*inputs)
-        _ = compiled_model(*inputs)
+    use_bias_list = [True, False]
+
+    # for use_bias in use_bias_list:
+    import itertools
+    for autocast_enabled, use_bias in itertools.product(
+        [True, False], use_bias_list
+    ):
+        # autocast_enabled = True
+        mod = M(use_bias=use_bias, do_permute=True)
+        inputs = (torch.randn((2, 4, 3, 4)),)
+        convert_model = _generate_qdq_quantized_model(mod, inputs)
+        with torch.no_grad(), torch.cpu.amp.autocast(enabled=autocast_enabled):
+            res_ref = convert_model(*inputs)
+
+            compiled_model = torch.compile(convert_model)
+            _ = compiled_model(*inputs)
+            res = compiled_model(*inputs)
+            # print("res_ref is: {}".format(res_ref), flush=True)
+            # print("res is: {}".format(res), flush=True)
+            print(torch.allclose(res, res_ref, atol=0.01, rtol=0.01), flush=True)
 
 def test_fp32_linear_input_exceed_2_non_contiguous():
     mod = M(use_bias=False, do_permute=True)
