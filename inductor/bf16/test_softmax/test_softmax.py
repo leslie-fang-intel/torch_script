@@ -1,3 +1,15 @@
+# TORCHINDUCTOR_FREEZING=1  TORCH_LOGS="+output_code" numactl -C 56-111 -m 1 python test_softmax.py
+# * Eager time: 8.335479021072388
+# * Inductor Baseline time: 16.34844946861267
+
+# Modfied the generated kernel implementation
+# Refer to: https://github.com/pytorch/pytorch/blob/da0635d17c8fc777010fc3a2c5efedfade499432/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L147-L211
+
+# * Inductor optimize 1 (naive loop fusion) time: 11.380375862121582
+# * <TODO> Inductor optimize 2 (naive loop fusion + eliminate reduant store/load) time:
+#   * Define a tmp buf to do accum; May not easy to implement in Inductor CPP backend
+# * best_performance_generated_code.py time: 3.912254571914674
+
 import torch
 import time
 import random
@@ -29,6 +41,9 @@ class M(torch.nn.Module):
         mask_value = torch.full([], mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
         attn_weights = torch.where(causal_mask, attn_weights.to(attn_weights.dtype), mask_value)
 
+        # attn_weights:
+        # size(4, 12, 1024, 1024)
+        # stride(12582912, 1048576, 1024, 1)
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_weights = attn_weights.type(value.dtype)
         attn_weights = self.attn_dropout(attn_weights)   

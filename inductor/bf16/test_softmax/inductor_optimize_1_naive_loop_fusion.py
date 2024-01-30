@@ -10,7 +10,7 @@ from torch._inductor.hooks import run_intermediate_hooks
 from torch._inductor.utils import maybe_profile
 from torch._inductor.codegen.memory_planning import _align as align
 
-from torch import device, empty, empty_strided
+from torch import device, empty_strided
 from torch._inductor.codecache import AsyncCompile
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
@@ -18,13 +18,15 @@ from torch._inductor.codegen.multi_kernel import MultiKernelCall
 aten = torch.ops.aten
 inductor_ops = torch.ops.inductor
 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
 alloc_from_pool = torch.ops.inductor._alloc_from_pool
 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
 async_compile = AsyncCompile()
 
 
 cpp_fused_clone_0 = async_compile.cpp_pybinding(['const bfloat16*', 'bfloat16*', 'bfloat16*'], '''
-#include "/tmp/torchinductor_jianan/kf/ckfqpz6yp2sujhwvtvlb2vb43nqje6bvriedz3vj5dms52hfmvis.h"
+#include "/tmp/torchinductor_leslie/lg/clghje745biezhrbrw5fghxqjaj76ck5jms7466s4ax63eruswf5.h"
 extern "C" void kernel(const bfloat16* in_ptr0,
                        bfloat16* out_ptr0,
                        bfloat16* out_ptr1)
@@ -76,7 +78,7 @@ extern "C" void kernel(const bfloat16* in_ptr0,
 
 
 cpp_fused__softmax_clone_div_full_where_1 = async_compile.cpp_pybinding(['const bool*', 'const bfloat16*', 'const bfloat16*', 'float*', 'float*', 'float*', 'bfloat16*', 'bfloat16*'], '''
-#include "/tmp/torchinductor_jianan/kf/ckfqpz6yp2sujhwvtvlb2vb43nqje6bvriedz3vj5dms52hfmvis.h"
+#include "/tmp/torchinductor_leslie/lg/clghje745biezhrbrw5fghxqjaj76ck5jms7466s4ax63eruswf5.h"
 extern "C" void kernel(const bool* in_ptr0,
                        const bfloat16* in_ptr1,
                        const bfloat16* in_ptr2,
@@ -94,9 +96,9 @@ extern "C" void kernel(const bool* in_ptr0,
             {
                 for(long x1=static_cast<long>(0L); x1<static_cast<long>(1024L); x1+=static_cast<long>(1L))
                 {
-                    auto buffer = std::make_unique<float []>(1024);
-                    float* buffer_data = buffer.get();
                     {
+                        #pragma omp declare reduction(max:at::vec::Vectorized<float>:omp_out = at::vec::maximum(omp_out, omp_in)) initializer(omp_priv={at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())})
+                        float tmp_acc0 = -std::numeric_limits<float>::infinity();
                         at::vec::Vectorized<float> tmp_acc0_vec = at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity());
                         for(long x2=static_cast<long>(0L); x2<static_cast<long>(1024L); x2+=static_cast<long>(16L))
                         {
@@ -111,26 +113,54 @@ extern "C" void kernel(const bool* in_ptr0,
                             auto tmp8 = decltype(tmp5)::blendv(tmp7, tmp5, tmp0);
                             auto tmp9 = (tmp8);
                             tmp_acc0_vec = at::vec::maximum(tmp_acc0_vec, tmp9);
-                            tmp8.store(buffer_data + x2);
                         }
-                        float max_val = at::vec::vec_reduce_all([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return at::vec::maximum(x, y); }, tmp_acc0_vec);
-                        at::vec::Vectorized<float> sum_fvec = at::vec::Vectorized<float>(float(0));                  
+                        tmp_acc0 = max_propagate_nan(tmp_acc0, at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return at::vec::maximum(x, y); }, tmp_acc0_vec));
+                        out_ptr0[static_cast<long>(x1 + (1024L*x0))] = static_cast<float>(tmp_acc0);
+                    }
+
+                    // Loop 2
+                    for(long x2=static_cast<long>(0L); x2<static_cast<long>(1024L); x2+=static_cast<long>(16L))
+                    {
+                        auto tmp0 = flag_to_float_vec(in_ptr0 + static_cast<long>(x2 + (1024L*x1)));
+                        auto tmp2 = cvt_lowp_fp_to_fp32<bfloat16>(tmp1);
+                        auto tmp3 = static_cast<float>(8.0);
+                        auto tmp4 = at::vec::Vectorized<float>(tmp3);
+                        auto tmp5 = tmp2 / tmp4;
+                        auto tmp6 = static_cast<float>(-3.3895313892515355e+38);
+                        auto tmp7 = at::vec::Vectorized<float>(tmp6);
+                        auto tmp8 = decltype(tmp5)::blendv(tmp7, tmp5, tmp0);
+                        auto tmp9 = (tmp8);
+                        auto tmp11 = at::vec::Vectorized<float>(tmp10);
+                        auto tmp12 = tmp9 - tmp11;
+                        auto tmp13 = tmp12.exp();
+                        tmp13.store(out_ptr1 + static_cast<long>(x2 + (1024L*x1) + (1048576L*x0)));
+                    }
+
+                    // Loop 3
+                    {
+                        #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out = omp_out + omp_in) initializer(omp_priv={at::vec::Vectorized<float>(0)})
+                        float tmp_acc02 = 0;
+                        at::vec::Vectorized<float> tmp_acc0_vec2 = at::vec::Vectorized<float>(0);
                         for(long x2=static_cast<long>(0L); x2<static_cast<long>(1024L); x2+=static_cast<long>(16L))
                         {
-                            at::vec::Vectorized<float> data_fvec = (at::vec::Vectorized<float>::loadu(buffer_data + x2) - at::vec::Vectorized<float>(max_val)).exp();
-                            sum_fvec += data_fvec;
-                            data_fvec.store(buffer_data + x2);
+                            auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr1 + static_cast<long>(x2 + (1024L*((1024L*x0) + x1))));
+                            tmp_acc0_vec2 = tmp_acc0_vec2 + tmp0;
                         }
-                        float sum_val = at::vec::vec_reduce_all([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return x + y; }, sum_fvec);                                                                     
-                        sum_val = 1.0 / sum_val;
-                        int64_t d2 = 0;
-                        for (; d2 < 1024; d2 += 32) {
-                            at::vec::Vectorized<float> out_fvec0 = at::vec::Vectorized<float>::loadu(buffer_data + d2) * at::vec::Vectorized<float>(sum_val);
-                            at::vec::Vectorized<float> out_fvec1 = at::vec::Vectorized<float>::loadu(buffer_data + d2 + 16) * at::vec::Vectorized<float>(sum_val);
-                            at::vec::Vectorized<bfloat16> out_vec = at::vec::convert_from_float<bfloat16>(out_fvec0, out_fvec1);
-                            out_vec.store(out_ptr3 + static_cast<long>(d2 + (1024L*x1) + (1048576L*x0)), 32);
-                        }
+                        tmp_acc02 = tmp_acc02 + at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return x + y; }, tmp_acc0_vec2);
+                        out_ptr2[static_cast<long>((1024L*x0) + x1)] = static_cast<float>(tmp_acc02);
                     }
+                    
+                    // Loop 4:
+                    for(long x2=static_cast<long>(0L); x2<static_cast<long>(1024L); x2+=static_cast<long>(16L))
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr1 + static_cast<long>(x2 + (1024L*((1024L*x0) + x1))));
+                        auto tmp1 = out_ptr2[static_cast<long>(((1024L*x0) + x1))];
+                        auto tmp2 = at::vec::Vectorized<float>(tmp1);
+                        auto tmp3 = tmp0 / tmp2;
+                        auto tmp4 = cvt_fp32_to_lowp_fp<bfloat16>(tmp3);
+                        tmp4.store(out_ptr3 + static_cast<long>(x2 + (1024L*((1024L*x0) + x1))), 16);
+                    }
+                                         
                 }
             }
         }
@@ -165,19 +195,17 @@ def call(args):
     args.clear()
     assert_size_stride(arg0_1, (4, 1024, 2304), (2359296, 2304, 1))
     assert_size_stride(arg1_1, (1, 1, 1024, 1024), (1048576, 1048576, 1024, 1))
-    buf0 = empty((4, 12, 1024, 64), device='cpu', dtype=torch.bfloat16)
-    buf1 = empty((4, 12, 64, 1024), device='cpu', dtype=torch.bfloat16)
+    buf0 = empty_strided_cpu((4, 12, 1024, 64), (786432, 65536, 64, 1), torch.bfloat16)
+    buf1 = empty_strided_cpu((4, 12, 64, 1024), (786432, 65536, 1024, 1), torch.bfloat16)
     cpp_fused_clone_0(arg0_1, buf0, buf1)
-    buf2 = empty((48, 1024, 1024), device='cpu', dtype=torch.bfloat16)
+    buf2 = empty_strided_cpu((48, 1024, 1024), (1048576, 1024, 1), torch.bfloat16)
     # Source Nodes: [attn_weights], Original ATen: [aten.bmm]
     extern_kernels.bmm(reinterpret_tensor(buf0, (48, 1024, 64), (65536, 64, 1), 0), reinterpret_tensor(buf1, (48, 64, 1024), (65536, 1024, 1), 0), out=buf2)
-    buf3 = empty_strided((4, 12, 1024, 1), (12288, 1024, 1, 49152), device='cpu', dtype=torch.float32)
-    buf4 = empty((4, 12, 1024, 1024), device='cpu', dtype=torch.float32)
-    buf5 = empty_strided((4, 12, 1024, 1), (12288, 1024, 1, 49152), device='cpu', dtype=torch.float32)
-    buf6 = empty((4, 12, 1024, 1024), device='cpu', dtype=torch.bfloat16)
+    buf3 = empty_strided_cpu((4, 12, 1024, 1), (12288, 1024, 1, 49152), torch.float32)
+    buf4 = empty_strided_cpu((4, 12, 1024, 1024), (12582912, 1048576, 1024, 1), torch.float32)
+    buf5 = empty_strided_cpu((4, 12, 1024, 1), (12288, 1024, 1, 49152), torch.float32)
+    buf6 = empty_strided_cpu((4, 12, 1024, 1024), (12582912, 1048576, 1024, 1), torch.bfloat16)
     buf7 = reinterpret_tensor(buf1, (4, 12, 1024, 64), (786432, 65536, 64, 1), 0); del buf1  # reuse
-    # print("buf2.size() is: {}".format(buf2.size()), flush=True)
-    # print("buf2.stride() is: {}".format(buf2.stride()), flush=True)
     cpp_fused__softmax_clone_div_full_where_1(arg1_1, buf2, arg0_1, buf3, buf4, buf5, buf6, buf7)
     del arg0_1
     del arg1_1
