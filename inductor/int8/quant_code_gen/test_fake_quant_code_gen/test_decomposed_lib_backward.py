@@ -20,8 +20,6 @@ def test_eager():
     input = torch.randn(1, 3, 224, 224, requires_grad=True)
     scales = torch.ones((1, 3, 224, 224,))
     zero_points = torch.zeros((1, 3, 224, 224,))
-    # scales = torch.ones((3,))
-    # zero_points = torch.zeros((3,))
     axis = 1
     quant_min = -128
     quant_max = 127
@@ -36,8 +34,6 @@ def test_compile():
     input = torch.randn(1, 3, 224, 224, requires_grad=True)
     scales = torch.ones((1, 3, 224, 224,))
     zero_points = torch.zeros((1, 3, 224, 224,))
-    # scales = torch.ones((3,))
-    # zero_points = torch.zeros((3,))
     axis = 1
     quant_min = -128
     quant_max = 127
