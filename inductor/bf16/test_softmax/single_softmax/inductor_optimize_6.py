@@ -28,6 +28,7 @@ async_compile = AsyncCompile()
 cpp_fused__softmax_0 = async_compile.cpp_pybinding(['const bfloat16*', 'float*', 'float*', 'float*', 'bfloat16*'], '''
 #include "/tmp/torchinductor_leslie/lg/clghje745biezhrbrw5fghxqjaj76ck5jms7466s4ax63eruswf5.h"
 #include <iostream>
+#include <memory>
 extern "C" void kernel(const bfloat16* in_ptr0,
                        float* out_ptr0,
                        float* out_ptr1,

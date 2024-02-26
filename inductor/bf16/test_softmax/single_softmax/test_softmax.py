@@ -5,7 +5,7 @@
 # Modfied the generated kernel implementation
 # Refer to: https://github.com/pytorch/pytorch/blob/da0635d17c8fc777010fc3a2c5efedfade499432/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L147-L211
 
-# * Step 2: Inductor optimize 1: naive loop fusion time: 4.443028450012207
+# * Step 2: Inductor optimize 1: naive loop fusion time: 5.443028450012207
 # * Step 3: Inductor optimize 2: The max val calculation in loop 1 don't need to store for the usage in Loop 2. No Obvious improvement
 # * Step 4: Inductor optimize 3: In loop 2, load elements and convert to FP32 again. We can save the FP32 data in loop 1, it will save the convert time.  No Obvious improvement
 # * Step 5: Inductor optimize 4: The sum val calculation in loop 2 don't need to store for the usage in Loop 3. No Obvious improvement
