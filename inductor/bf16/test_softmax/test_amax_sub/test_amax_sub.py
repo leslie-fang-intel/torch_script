@@ -65,8 +65,8 @@ if __name__ == "__main__":
         print("ref time is: {}".format(ref_end - ref_start), flush=True)
         # # print("jit time is: {}".format(jit_end - jit_start), flush=True)
         print("inductor time is: {}".format(inductor_end - inductor_start), flush=True)
-        print(torch.allclose(ref_res[0], inductor_res[0], atol=0.01, rtol=0.01), flush=True)
-        print(torch.allclose(ref_res[1], inductor_res[1], atol=0.01, rtol=0.01), flush=True)
+        print(torch.allclose(ref_res, inductor_res, atol=0.01, rtol=0.01), flush=True)
+        # print(torch.allclose(ref_res[1], inductor_res[1], atol=0.01, rtol=0.01), flush=True)
 
 
 
