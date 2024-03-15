@@ -11,9 +11,12 @@
 # * Step 5: Inductor optimize 4: The sum val calculation in loop 2 don't need to store for the usage in Loop 3. No Obvious improvement
 # * Step 6: Inductor optimize 5: Multi inv_sum instead of div sum. No Obvious improvement
 # * Step 7: Inductor optimize 6: In Loop 2, the val after exp will save to tmp buffer (size is dim_size) instead of entire buffer (size is dim_size * outer_size)  1.0165352821350098
-  
+#    * Option 2: Outer_ptr1 通过 thread_id 来索引，这样也只需要访问一小部分 内存 1.62
+
 # * Step 8: best_performance_generated_code.py time: 1.0116770267486572
-#   * Step 2 and Step 7 are the only 2 steps we needed to get similar performance as aten.
+#   * First apply the outer loop fusion.
+#   * Option 1: Apply step 7, get similar performance as aten.
+#   * Option 2: Apply step 7 option 2: lots improved, still bit worse than best performance
 
 import torch
 import time
