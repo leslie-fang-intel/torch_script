@@ -91,7 +91,7 @@ def test_sdpa_pattern():
 
         annotate_matmul = True
         if annotate_matmul:
-            quantizer.add_extra_quantizable_op(torch.ops.aten.matmul.default)
+            quantizer._add_quantizable_op(torch.ops.aten.matmul.default)
 
         from torch._export import capture_pre_autograd_graph
 
