@@ -1,5 +1,5 @@
 
-# clear && rm -rf /tmp/torchinductor_leslie/* && numactl -C 56-111 -m 1 python micro_gemm_u8s8s32.py
+# clear && rm -rf /tmp/torchinductor_leslie/* && numactl -C 56-111 -m 1 python micro_gemm_u8s8s32_vectorize.py
 
 # AOT ID: ['0_inference']
 from ctypes import c_void_p, c_long
@@ -36,11 +36,11 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
                        const signed char* __restrict__  in_ptr1,
                        int* __restrict__  out_ptr1)
 {
-    for (int m=0; m<128; m++) {
-        for (int n=0; n<512; n++) {
-            out_ptr1[m*512 + n] = 0;
-            for (int k=0; k<1024; k++) {
-                out_ptr1[m*512 + n] += in_ptr0[m*1024 + k] * in_ptr1[k*512 + n];
+    for (int m=0; m<32; m++) {
+        for (int n=0; n<64; n++) {
+            out_ptr1[m*64 + n] = 0;
+            for (int k=0; k<128; k++) {
+                out_ptr1[m*64 + n] += in_ptr0[m*128 + k] * in_ptr1[k*64 + n];
             }
         }
     }
@@ -56,31 +56,73 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
                        const signed char* __restrict__  in_ptr1,
                        int* __restrict__  out_ptr1)
 {
-    constexpr auto BLOCK_M = 128;
-    constexpr auto BLOCK_N = 512;
+    constexpr auto BLOCK_M = 32;
+    constexpr auto BLOCK_N = 64;
+    int64_t K = 128;
+    constexpr bool accum = false;
+    int alpha = 1;
+    int lda = 128;
+    int ldb = 64;
+    int ldc = 64;
                                                  
                                                                  
     using Vectorized = at::vec::Vectorized<int>;
+    using VectorizedB = at::vec::Vectorized<unsigned char>;
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
     Vectorized va;
     at::vec::VectorizedN<int, COLS> vb;
     at::vec::VectorizedN<int, ROWS*COLS> vc;
+
+
+    auto loadc = [&](auto i) {
+        if constexpr (accum) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            vc[i] = Vectorized::loadu(out_ptr1 + row * ldc + col * VLEN);
+        } else {
+            vc[i] = Vectorized(0);
+        }
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
                                                                  
-    for (int k=0; k<1024; k++) {
-        for (int m=0; m<128; m++) {
-            for (int n=0; n<512; n++) {
-                out_ptr1[m*512 + n] += in_ptr0[m*1024 + k] * in_ptr1[k*512 + n];
+    auto compute = [&, COLS](auto i, int k) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        if constexpr (col == 0) {
+            if (alpha != 1) {
+                // convert scalar u8 to int32
+               va = Vectorized(int(in_ptr0[row * lda + k]) * alpha);
+            } else {
+               va = Vectorized(int(in_ptr0[row * lda + k]));                                                  
             }
         }
+        if constexpr (row == 0) {
+            // convert vectorized s8 to int32
+            vb[col] = at::vec::convert_to_int32(in_ptr1 + k * ldb + col * VLEN);
+        }
+        constexpr int idx = row * COLS + col;
+        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+    };
+
+    #pragma unroll(4)
+    for (int k = 0; k < K; ++k) {
+        c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
 
-                                                                 
+    // store to C
+    auto storec = [&](auto i) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        vc[i].store(out_ptr1 + row * ldc + col * VLEN);
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+                                                                                                                                                                                       
 }
 ''')
 
-m, n, k = 128, 512, 1024
+m, n, k = 32, 64, 128
 
 async_compile.wait(globals())
 del async_compile
