@@ -90,19 +90,82 @@ cpp_fused__softmax_0_outer_product = async_compile.cpp_pybinding(['const unsigne
 #include "/localdisk/leslie/torch_inductor_community/pytorch/torch/_inductor/codegen/cpp_prefix.h"
 #include <iostream>
 #include <c10/util/Unroll.h>
+
+template <typename scalar_t>
+inline void _sum_a_contiguous_kernel(
+    const scalar_t* in,
+    float* out,
+    const int& M,
+    const int& K,
+    const int& ld) {
+    using VectorizedA = at::vec::Vectorized<unsigned char>;
+    using Vectorize_f32 = at::vec::Vectorized<float>;
+    auto VLEN = Vectorize_f32::size();
+    for (int m=0; m<M; m++) {
+        float tmp_sum = 0.0;
+        Vectorize_f32 vec_tmp_sum(tmp_sum);
+        int k = 0;
+        for (; k < c10::div_floor_integer(K, VLEN) * VLEN; k+=VLEN) {
+            VectorizedA tmpA = VectorizedA::loadu(in + m*K + k, VLEN);
+            vec_tmp_sum += convert_int8_to_float(tmpA);
+        }
+        tmp_sum += at::vec::vec_reduce_all<float>(
+            [](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) {
+                return x + y;
+            },
+            vec_tmp_sum);
+        for (; k<K; k+=1) {
+            tmp_sum += in[m*K + k];     
+        }
+        out[m] = tmp_sum;
+    }
+}
                                                                  
+template <typename scalar_t>
+inline void _sum_b_contiguous_kernel(
+    const scalar_t* in,
+    float* out,
+    const int& K,
+    const int& N,
+    const int& ld) {
+    using VectorizedB = at::vec::Vectorized<signed char>;
+    using Vectorize_f32 = at::vec::Vectorized<float>;
+    auto VLEN = Vectorize_f32::size();
+    for (int k=0; k<K; k++) {
+        int n=0;
+        for (; n < c10::div_floor_integer(N, VLEN) * VLEN; n+=VLEN) {
+            Vectorize_f32 temp_b_compensate;
+            if (k == 0){
+                temp_b_compensate = Vectorize_f32(0.0);
+            } else {
+                temp_b_compensate = Vectorize_f32::loadu(out + n, VLEN);                                                 
+            }
+            VectorizedB vb = VectorizedB::loadu(in + k * ld + n, VLEN);
+            Vectorize_f32 vb_f32 = convert_int8_to_float(vb);                                                                 
+            temp_b_compensate += vb_f32;                                                                 
+            temp_b_compensate.store(out + n);
+        }
+        for (; n<N; n+=1) {
+            if (k == 0) {
+                out[n] = 0.0;
+            }
+            out[n] += in[k*ld + n];
+        }
+    }
+}
+                                                                                                                                                                            
 extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
                        const signed char* __restrict__  in_ptr1,
                        float* __restrict__  out_ptr1)
 {
     constexpr auto BLOCK_M = 32;
     constexpr auto BLOCK_N = 64;
-    int64_t K = 128;
+    const int K = 128;
     constexpr bool accum = false;
     int alpha = 1;
-    int lda = 128;
-    int ldb = 64;
-    int ldc = 64;
+    int lda = K;
+    int ldb = BLOCK_N;
+    int ldc = BLOCK_N;
 
     float a_scale = 0.02;
     int a_zp = 10;
@@ -111,8 +174,10 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
                                                  
                                                                  
     using Vectorized = at::vec::Vectorized<int>;
-    using VectorizedB = at::vec::Vectorized<unsigned char>;
+    using VectorizedA = at::vec::Vectorized<unsigned char>;
+    using VectorizedB = at::vec::Vectorized<signed char>;
     using Vectorize_f32 = at::vec::Vectorized<float>;
+
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
@@ -148,6 +213,7 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
             vb[col] = at::vec::convert_to_int32(in_ptr1 + k * ldb + col * VLEN);
         }
         constexpr int idx = row * COLS + col;
+        // Do s32s32s32 fmadd
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
@@ -158,23 +224,43 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
 
 
     // Compute the compensation of in_ptr0
-    float a_compensate[BLOCK_M];
-    for (int m=0; m<BLOCK_M; m++) {
-        a_compensate[m] = 0.0;
-        for (int k=0; k<K; k++) {
-            a_compensate[m] += in_ptr0[m*K + k];
-        }
-    }
+    // Scalar Version
+    //float a_compensate[BLOCK_M];
+    //for (int m=0; m<BLOCK_M; m++) {
+    //    a_compensate[m] = 0.0;
+    //    for (int k=0; k<K; k++) {
+    //        a_compensate[m] += in_ptr0[m*K + k];
+    //    }
+    //}
 
+    // Vectorize Version
+    float a_compensate[BLOCK_M];
+    _sum_a_contiguous_kernel(
+        in_ptr0,
+        a_compensate,
+        BLOCK_M,
+        K,
+        lda);
+                                                           
     // Compute the compensation of in_ptr1
-    float b_compensate[BLOCK_N];
-    for (int n=0; n<BLOCK_N; n++) {
-        b_compensate[n] = 0.0;
-        for (int k=0; k<K; k++) {
-            b_compensate[n] += in_ptr1[k*BLOCK_N + n];
-        }
-    } 
-                                                            
+    // Scalar Version
+    //float b_compensate[BLOCK_N];
+    //for (int n=0; n<BLOCK_N; n++) {
+    //    b_compensate[n] = 0.0;
+    //    for (int k=0; k<K; k++) {
+    //        b_compensate[n] += in_ptr1[k*BLOCK_N + n];
+    //    }
+    //}
+
+    // Vectorized Version
+    float b_compensate[BLOCK_N];                               
+    _sum_b_contiguous_kernel<signed char>(
+        in_ptr1,
+        b_compensate,
+        K,
+        BLOCK_N,
+        ldb);
+                                                                                      
     // Compensate and store to C
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
