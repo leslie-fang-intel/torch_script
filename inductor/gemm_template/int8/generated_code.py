@@ -49,7 +49,7 @@ extern "C" void kernel(const float* in_ptr0,
         for(long x0=static_cast<long>(0L); x0<static_cast<long>(4096L); x0+=static_cast<long>(16L))
         {
             auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + static_cast<long>(x0), 16);
-            auto tmp1 = static_cast<float>(33.556986525599264);
+            auto tmp1 = static_cast<float>(5);
             auto tmp2 = at::vec::Vectorized<float>(tmp1);
             auto tmp3 = tmp0 * tmp2;
             auto tmp4 = tmp3.round();
@@ -101,39 +101,6 @@ inline void kernel_micro_gemm(
     }
 }
 
-template <typename scalar_t>
-inline void _sum_b_contiguous_kernel(
-    const scalar_t* in,
-    float* out,
-    const int& K,
-    const int& N,
-    const int& ld) {
-    using VectorizedB = at::vec::Vectorized<signed char>;
-    using Vectorize_f32 = at::vec::Vectorized<float>;
-    auto VLEN = Vectorize_f32::size();
-    for (int k=0; k<K; k++) {
-        int n=0;
-        for (; n < c10::div_floor_integer(N, VLEN) * VLEN; n+=VLEN) {
-            Vectorize_f32 temp_b_compensate;
-            if (k == 0){
-                temp_b_compensate = Vectorize_f32(0.0);
-            } else {
-                temp_b_compensate = Vectorize_f32::loadu(out + n, VLEN);                                                 
-            }
-            VectorizedB vb = VectorizedB::loadu(in + k * ld + n, VLEN);
-            Vectorize_f32 vb_f32 = convert_int8_to_float(vb);                                                                 
-            temp_b_compensate += vb_f32;                                                                 
-            temp_b_compensate.store(out + n);
-        }
-        for (; n<N; n+=1) {
-            if (k == 0) {
-                out[n] = 0.0;
-            }
-            out[n] += in[k*ld + n];
-        }
-    }
-}
-
 extern "C"
 void kernel(const unsigned char* X, const float* x_scale, const int* x_zp, const signed char* W, const float* w_scale, const int* w_zp, float* Y)
 {
@@ -148,14 +115,14 @@ void kernel(const unsigned char* X, const float* x_scale, const int* x_zp, const
     constexpr int64_t K0_blocks = (K + K0 - 1) / K0;
 
     static_assert(N % N0 == 0, "N dimension must be multiple of N0");
-
-    float b_compensate[N];                               
-    _sum_b_contiguous_kernel<signed char>(
-        W,
-        b_compensate,
-        K,
-        N,
-        N);
+                             
+    float b_compensate[N];
+    for (int n=0; n<N; n++) {
+        b_compensate[n] = 0.0;
+        for (int k=0; k<K; k++) {
+            b_compensate[n] += W[k*N + n];
+        }
+    }
 
     // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     constexpr int64_t M = static_cast<long>(32L);
@@ -244,19 +211,23 @@ void kernel(const unsigned char* X, const float* x_scale, const int* x_zp, const
             }
         }
     }
-    // for (int m=0; m<32;m++) {
-    //    for (int n=0;n<64;n++) {
-    //        float cur_y = Y[m*64 + n];
+    for (int m = 0; m < 32; m++) {
+        for (int n = 0; n < 64; n++) {
+            float cur_y = Y[m*64 + n];
 
-    //        if (m == 0 && n == 0) {
-    //            std::cout<<"---- m is: "<<m<<" n is: "<<n<<" cur_y is: "<<cur_y<<std::endl;
-    //        }
+            if (m == 0 && n == 0) {
+                std::cout<<"---- m is: "<<m<<" n is: "<<n<<" cur_y is: "<<cur_y<<std::endl;
+                std::cout<<"---- x_scale[0] is: "<<x_scale[0]<<std::endl;
+                std::cout<<"---- x_zp[0] is: "<<x_zp[0]<<std::endl;
+                std::cout<<"---- w_scale[n] is: "<<w_scale[n]<<std::endl;
+                std::cout<<"---- b_compensate[n] is: "<<b_compensate[n]<<std::endl;
+            }
 
-    //        cur_y = x_scale[0] * w_scale[n] * cur_y;
-    //        cur_y -= x_scale[0] * w_scale[n] * x_zp[0] * b_compensate[n];
-    //        Y[m*64 + n] = cur_y;  
-    //    }
-    //}
+            cur_y = x_scale[0] * w_scale[n] * cur_y;
+            cur_y -= x_scale[0] * w_scale[n] * x_zp[0] * b_compensate[n];
+            Y[m*64 + n] = cur_y;  
+        }
+    }
 }
 ''')
 
@@ -270,20 +241,49 @@ def call(args):
     assert_size_stride(arg3_1, (32, 128), (128, 1))
     buf0 = empty_strided_cpu((32, 128), (128, 1), torch.uint8)
     cpp_fused_quantize_per_tensor_0(arg3_1, buf0)
-    del arg3_1
+    # del arg3_1
     buf2 = empty_strided_cpu((32, 64), (64, 1), torch.float32)
 
+    global constant6
     print("buf0 is: {}".format(buf0), flush=True)
     print("constant6 is: {}".format(constant6), flush=True)
 
+    constant6_f = torch.ops.quantized_decomposed.dequantize_per_channel(
+        constant6.squeeze(2),
+        _frozen_param0,
+        _frozen_param1_0,
+        1,
+        -128,
+        127,
+        torch.int8
+    )
 
-    ref_res = torch.matmul(buf0.to(torch.int32), constant6.squeeze(2).to(torch.int32))
+    print(constant6_f.size(), flush=True)
+
+    # ref_res = torch.matmul(buf0.to(torch.int32), constant6.squeeze(2).to(torch.int32))
+    fake_buf0_f = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        buf0,
+        0.2,
+        132,
+        0,
+        255,
+        torch.uint8,
+    )
+    ref_res = torch.matmul(fake_buf0_f, constant6_f)
     print("---- Eager ref_res is: {}".format(ref_res), flush=True)
 
     cpp_fused_mm_quantize_per_tensor_1(buf0, x_scale, x_zp, constant6, _frozen_param0, _frozen_param1_0, buf2)
     print("---- Inductor buf2 is: {}".format(buf2), flush=True)
 
-    print(torch.allclose(ref_res.to(torch.float), buf2, atol=1e-3, rtol=1e-3), flush=True)
+    print(torch.allclose(ref_res.to(torch.float), buf2, atol=1e-2, rtol=1e-2), flush=True)
+    # print(np.sum( (ref_res.to(torch.float) - buf2).numpy() > 0.5 ), flush=True)
+
+    # print(buf2.size(), flush=True)
+    # for m in range(32):
+    #     for n in range(64):
+    #         if abs(ref_res[m][n] - buf2[m][n]) > 0.1:
+    #             print(buf2[m][n], flush=True)
+    #             print(ref_res[m][n], flush=True)
 
     return (buf2, )
 
@@ -298,9 +298,11 @@ def benchmark_compiled_module(times=10, repeat=10):
     global _frozen_param3
     _frozen_param3 = rand_strided((128, 64), (1, 0), device='cpu', dtype=torch.int8)
     global x_scale
-    x_scale = rand_strided((), (), device='cpu', dtype=torch.float32)
+    # x_scale = rand_strided((), (), device='cpu', dtype=torch.float32)
+    x_scale = torch.tensor([0.2], dtype=torch.float32)
     global x_zp
-    x_zp = rand_strided((), (), device='cpu', dtype=torch.int32)
+    # x_zp = rand_strided((), (), device='cpu', dtype=torch.int32)
+    x_zp = torch.tensor([132], dtype=torch.int32)
     global _frozen_param1_0
     _frozen_param1_0 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.int32)
     global constant6
