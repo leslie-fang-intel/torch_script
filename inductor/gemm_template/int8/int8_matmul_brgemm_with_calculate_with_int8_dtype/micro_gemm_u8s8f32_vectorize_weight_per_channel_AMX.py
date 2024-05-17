@@ -44,7 +44,7 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
     // int b_zp = 5;
     
     int M = 32;
-    int N = 64;
+    int N = 32;
     int K = 128;
 
     // Calculate the u8s8s32 with inner product
@@ -77,11 +77,11 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
 
     // Compensate the s32 output to f32
     for (int m=0; m<32; m++) {
-        for (int n=0; n<64; n++) {
-            out_ptr1[m*64 + n] = a_scale * b_scale[n] * out_ptr1[m*64 + n];
-            out_ptr1[m*64 + n] -= a_scale * b_scale[n] * a_zp * b_compensate[n];
-            out_ptr1[m*64 + n] -= a_scale * b_scale[n] * b_zp[n] * a_compensate[m];
-            out_ptr1[m*64 + n] += a_scale * b_scale[n] * a_zp * b_zp[n] * K;
+        for (int n=0; n<32; n++) {
+            out_ptr1[m*32 + n] = a_scale * b_scale[n] * out_ptr1[m*32 + n];
+            out_ptr1[m*32 + n] -= a_scale * b_scale[n] * a_zp * b_compensate[n];
+            out_ptr1[m*32 + n] -= a_scale * b_scale[n] * b_zp[n] * a_compensate[m];
+            out_ptr1[m*32 + n] += a_scale * b_scale[n] * a_zp * b_zp[n] * K;
         }
     }
 }
@@ -93,6 +93,16 @@ cpp_fused__softmax_0_outer_product = async_compile.cpp_pybinding(['const unsigne
 #include <iostream>
 #include <c10/util/Unroll.h>
 
+typedef struct tileconfig_t {
+  uint8_t palette_id;
+  uint8_t startRow;
+  uint8_t reserved[14];
+  uint16_t colb[16]; // 一般就用 前8个, 每个值 分别对应 一个 Tile 的 一行有多少 bytes 数据
+  uint8_t rows[16];  // 一般就用 前8个, 每个值 分别对应 一个 Tile 的 有多少行数据
+} tileconfig_t;
+                                                                                                                           
+static tileconfig_t tc = {0};
+                                                                 
 template <typename scalar_t>
 inline void _sum_a_contiguous_kernel(
     const scalar_t* in,
@@ -163,11 +173,11 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
                        const int* __restrict__ b_zp                                        )
 {
     constexpr auto BLOCK_M = 32;
-    constexpr auto BLOCK_N = 64;
-    const int K = 128;
+    constexpr auto BLOCK_N = 32;
+    const int BLOCK_K = 128;
     constexpr bool accum = false;
     int alpha = 1;
-    int lda = K;
+    int lda = BLOCK_K;
     int ldb = BLOCK_N;
     int ldc = BLOCK_N;
 
@@ -175,75 +185,147 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
     int a_zp = 10;
     // float b_scale = 0.04;
     // int b_zp = 5;
-                                                 
+    
+
+    // <TODO> Transform B to VNNI Layout from (K, N) to (K/4, N, 4)
+    signed char B_VNNI_Layout[BLOCK_K*BLOCK_N];
+    int idx = 0;
+    for (int i = 0; i < BLOCK_K; i+=4) {
+        for (int j = 0; j < BLOCK_N; j++) {
+            B_VNNI_Layout[idx] = in_ptr1[i*ldb + j];
+            B_VNNI_Layout[idx + 1] = in_ptr1[(i+1)*ldb + j];
+            B_VNNI_Layout[idx + 2] = in_ptr1[(i+2)*ldb + j];
+            B_VNNI_Layout[idx + 3] = in_ptr1[(i+3)*ldb + j];
+            idx += 4;
+        }
+    }
+
+    const uint8_t TILE_M = 16;
+    const uint8_t TILE_N = 16;
+    const uint8_t TILE_IK = 64; // For INT8
+    // const uint8_t TILE_BK = 32; // For BF16
+    const uint8_t KPACK = 4; // 2 for bf16; 4 for int8; with VNNI Layout
                                                                  
-    using Vectorized = at::vec::Vectorized<int>;
-    using VectorizedA = at::vec::Vectorized<unsigned char>;
-    using VectorizedB = at::vec::Vectorized<signed char>;
-    using Vectorize_f32 = at::vec::Vectorized<float>;
+    // Config tiles
+    tc.palette_id = 1;
+    tc.startRow = 0;
 
-    constexpr auto VLEN = Vectorized::size();
-    constexpr auto ROWS = BLOCK_M;
-    constexpr auto COLS = BLOCK_N / VLEN;
-    Vectorized va;
-    at::vec::VectorizedN<int, COLS> vb;
-    at::vec::VectorizedN<int, ROWS*COLS> vc;
+    // Tile[0-3] 用作 C
+    for (int i=0;i<4;i++) {
+        tc.rows[i] = (uint8_t)TILE_M;
+        tc.colb[i] = (uint16_t)(TILE_N * sizeof(int)); // 配置 多少 bytes, at most 64 bytes                                                                 
+    }
+    
+    // Tile[4] 用作 A
+    tc.rows[4] = (uint8_t)TILE_M;
+    tc.colb[4] = (uint16_t)(TILE_IK * sizeof(uint8_t)); // 配置 多少 bytes
+    
+    // Tile[5~6] 用作 B
+    for (int i=5;i<7;i++) {
+        tc.rows[i] = (uint8_t)(TILE_IK / KPACK);
+        tc.colb[i] = (uint16_t)(TILE_N * KPACK * sizeof(uint8_t));
+    }
+    // 剩下1个Tile 先不用
 
 
-    auto loadc = [&](auto i) {
-        if constexpr (accum) {
-            constexpr int row = i / COLS;
-            constexpr int col = i % COLS;
-            vc[i] = Vectorized::loadu(out_ptr1 + row * ldc + col * VLEN);
+    // Config the Tiles
+    _tile_loadconfig((const void*)&tc);
+
+
+    constexpr int ROWS = BLOCK_M / TILE_M; // 2
+    constexpr int COLS = BLOCK_N / TILE_N; // 2
+
+
+    auto loadc = [&](int i) {
+        TORCH_CHECK(accum == false, "accum is not supported");
+        if (i == 0){
+            _tile_zero(0);                                                    
+        } else if (i == 1) {
+            _tile_zero(1);                                            
+        } else if (i == 2) {
+            _tile_zero(2);                                            
+        } else if (i == 3) {
+            _tile_zero(3);                                            
         } else {
-            vc[i] = Vectorized(0);
+            TORCH_CHECK(false, "C Tile exceed");                                                   
         }
     };
     c10::ForcedUnroll<ROWS * COLS>{}(loadc);
-                                                                 
+
+
+
+
     auto compute = [&, COLS](auto i, int k) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
         if constexpr (col == 0) {
-            if (alpha != 1) {
-                // convert scalar u8 to int32
-               va = Vectorized(int(in_ptr0[row * lda + k]) * alpha);
-            } else {
-               va = Vectorized(int(in_ptr0[row * lda + k]));                                                  
-            }
+            TORCH_CHECK(alpha == 1);
+            _tile_loadd(4, in_ptr0 + row * TILE_M * BLOCK_K + k * TILE_IK, BLOCK_K * sizeof(uint8_t));
         }
         if constexpr (row == 0) {
-            // convert vectorized s8 to int32
-            vb[col] = at::vec::convert_to_int32(in_ptr1 + k * ldb + col * VLEN);
+            if (col == 0) {
+                _tile_loadd(5, B_VNNI_Layout + k * (TILE_IK / KPACK) * (BLOCK_N * KPACK) + col * TILE_N * KPACK, BLOCK_N * KPACK * sizeof(uint8_t));                                                                 
+            } else {
+                TORCH_CHECK(col == 1);         
+                _tile_loadd(6, B_VNNI_Layout + k * (TILE_IK / KPACK) * (BLOCK_N * KPACK) + col * TILE_N * KPACK, BLOCK_N * KPACK * sizeof(uint8_t));                                      
+            }
         }
-        constexpr int idx = row * COLS + col;
-        // Do s32s32s32 fmadd
-        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+
+        if (i == 0){
+            _tile_dpbusd(0, 4, 5);                                                   
+        } else if (i == 1) {
+            _tile_dpbusd(1, 4, 6);                                         
+        } else if (i == 2) {
+            _tile_dpbusd(2, 4, 5);                                         
+        } else if (i == 3) {
+            _tile_dpbusd(3, 4, 6);                                         
+        } else {
+            TORCH_CHECK(false, "C Tile exceed");                                                   
+        }
     };
 
-    #pragma unroll(4)
-    for (int k = 0; k < K; ++k) {
+    for (int k = 0; k < (BLOCK_K/TILE_IK); k++) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
 
+    int out_ptr_int[BLOCK_M*BLOCK_N];
 
-    // Compute the compensation of in_ptr0
-    // Scalar Version
-    //float a_compensate[BLOCK_M];
-    //for (int m=0; m<BLOCK_M; m++) {
-    //    a_compensate[m] = 0.0;
-    //    for (int k=0; k<K; k++) {
-    //        a_compensate[m] += in_ptr0[m*K + k];
-    //    }
-    //}
+    // Compensate and store to C
+    auto storec = [&](auto i) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        if (i == 0){
+            _tile_stored(0, out_ptr_int, ldc * sizeof(int));                                                 
+        } else if (i == 1) {
+            _tile_stored(1, out_ptr_int + col * TILE_N, ldc * sizeof(int));                                      
+        } else if (i == 2) {
+            _tile_stored(2, out_ptr_int + row * TILE_M * ldc, ldc * sizeof(int));                                      
+        } else if (i == 3) {
+            _tile_stored(3, out_ptr_int + row * TILE_M * ldc + col * TILE_N, ldc * sizeof(int));                                        
+        } else {
+            TORCH_CHECK(false, "C Tile exceed");                                                   
+        }
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+                                                      
+    // Release the Tile Data
+    _tile_release(); 
 
+
+    // Do composentation to Convert int to float
+    using Vectorized = at::vec::Vectorized<int>;
+    using Vectorize_f32 = at::vec::Vectorized<float>;
+    constexpr auto VLEN = Vectorized::size();
+    constexpr int ROWS_for_comp = BLOCK_M;
+    constexpr int COLS_for_comp = BLOCK_N / VLEN;
+                                                                                                                                                                                                                                       
     // Vectorize Version
     float a_compensate[BLOCK_M];
     _sum_a_contiguous_kernel(
         in_ptr0,
         a_compensate,
         BLOCK_M,
-        K,
+        BLOCK_K,
         lda);
                                                            
     // Compute the compensation of in_ptr1
@@ -261,16 +343,17 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
     _sum_b_contiguous_kernel<signed char>(
         in_ptr1,
         b_compensate,
-        K,
+        BLOCK_K,
         BLOCK_N,
         ldb);
                                                                                       
     // Compensate and store to C
-    auto storec = [&](auto i) {
+    auto storec2 = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
+                                                                 
         
-        Vectorize_f32 temp = _mm512_cvtepi32_ps(vc[i]);
+        Vectorize_f32 temp = _mm512_cvtepi32_ps(Vectorized::loadu(out_ptr_int + i*VLEN));
 
         Vectorize_f32 b_scales_v = Vectorize_f32::loadu(b_scale + col * VLEN, VLEN);
         Vectorize_f32 b_zp_v = _mm512_cvtepi32_ps(Vectorized::loadu(b_zp + col * VLEN, VLEN));
@@ -279,16 +362,16 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
         temp -= Vectorize_f32(a_scale * a_zp) * b_scales_v * Vectorize_f32::loadu(b_compensate + col * VLEN, VLEN);   
         // We can skip below 2 if b_zp is 0
         temp -= Vectorize_f32(a_scale * a_compensate[row]) * b_scales_v * b_zp_v;  
-        temp += Vectorize_f32(a_scale * a_zp * K) * b_scales_v * b_zp_v;   
+        temp += Vectorize_f32(a_scale * a_zp * BLOCK_K) * b_scales_v * b_zp_v;   
 
         temp.store(out_ptr1 + row * ldc + col * VLEN);
     };
-    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+    c10::ForcedUnroll<ROWS_for_comp * COLS_for_comp>{}(storec2);
                                                                                                                                                                                        
 }
 ''')
 
-m, n, k = 32, 64, 128
+m, n, k = 32, 32, 128
 
 async_compile.wait(globals())
 del async_compile
