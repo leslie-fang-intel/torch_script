@@ -29,7 +29,7 @@ if __name__ == '__main__':
     ref_pred_masks = torch.load("ref_pred_masks.pt")
     # print(res_pred_masks, flush=True)
     # print(ref_pred_masks, flush=True)
-    # print(res_pred_masks.size(), flush=True)
+    print(res_pred_masks.size(), flush=True)
 
     for boxes in range(res_pred_masks.size(0)):
         # print(boxes, flush=True)
@@ -41,4 +41,3 @@ if __name__ == '__main__':
                 if res_pred_masks[boxes, h, w] != ref_pred_masks[boxes, h, w]:
                     print("Error", flush=True)
                     print(boxes, h, w, res_pred_masks[boxes, h, w], ref_pred_masks[boxes, h, w], flush=True)
-                    break
