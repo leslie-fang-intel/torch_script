@@ -56,11 +56,6 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
     float a_scale = _a_scale[0];
     int a_zp = _a_zp[0];
 
-    // std::cout<<" a_scale is: "<<a_scale<<std::endl;
-    // std::cout<<" a_zp is: "<<a_zp<<std::endl;
-    // float b_scale = 0.04;
-    // int b_zp = 5;
-    
     int M = 32;
     int N = 64;
     int K = 128;
@@ -72,9 +67,7 @@ extern "C" void kernel(const unsigned char* __restrict__  in_ptr0,
             for (int k=0; k<K; k++) {
                 out_ptr1[m*N + n] += in_ptr0[m*K + k] * in_ptr1[k*N + n];
             }
-            std::cout<<out_ptr1[m*N + n]<<" ";
         }
-        std::cout<<std::endl<<"-------"<<std::endl;   
     }
     
     // Compute the compensation of in_ptr0
@@ -427,13 +420,6 @@ void kernel(const uint8_t* X, const float* x_scale, const int32_t* x_zp, const i
                         );
 
                     }
-                }
-                std::cout<<"--- start to print int32 result----"<<std::endl;
-                for (int _m=m_start; _m<m_end ; _m++) {
-                    for (int _n=n_start; _n < n_start + N0; _n ++ ) {
-                        std::cout<<local_acc_buf[_n + (N0*_m)]<<" ";
-                    }
-                    std::cout<<std::endl;                                        
                 }
                 {
                     #pragma GCC ivdep
