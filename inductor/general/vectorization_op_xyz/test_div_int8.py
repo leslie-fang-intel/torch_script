@@ -25,8 +25,8 @@ class M(torch.nn.Module):
         self.attn_dropout = torch.nn.Dropout(0.1)
 
     def forward(self, x, x2):
-        # return torch.div(x, x2, rounding_mode="floor")
-        return torch.div(x, x2, rounding_mode="trunc")
+        return torch.div(x, x2, rounding_mode="floor")
+        # return torch.div(x, x2, rounding_mode="trunc")
         # return torch.div(x, x2)
 
 # dynamic = True
@@ -60,16 +60,16 @@ def single_check():
         m = M().eval()
         # for dtype in [torch.bool, torch.uint8, torch.int8, torch.int32, torch.int64]:
         # for dtype in [torch.bool]:
-        # input = torch.randn(128)
-        # input2 = torch.randn(128)
+        input = torch.randn(128)
+        input2 = torch.randn(128)
 
         # input = input.to(torch.uint8)
         # input2 = input2.to(torch.uint8)
 
-        dtype = torch.uint8
+        # dtype = torch.uint8
         
-        input = torch.randint(1, 100, (64,), dtype=dtype)
-        input2 = torch.randint(1, 100, (64,), dtype=dtype)
+        # input = torch.randint(1, 100, (64,), dtype=dtype)
+        # input2 = torch.randint(1, 100, (64,), dtype=dtype)
 
         # input = torch.tensor([-5]*128)
         # input2 = torch.tensor([-4]*128)
