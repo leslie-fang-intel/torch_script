@@ -1,42 +1,43 @@
 import torch
-import torchtune
+from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+import time
+from torch._export import capture_pre_autograd_graph
+class M(torch.nn.Module):
+    def __init__(self,):
+        super().__init__()
+        self.linear = torch.nn.Linear(in_features=1024, out_features=4096)
 
-def test_int4_wo_on_torch_tune_model_cpu():
-        from torchtune.models.llama2 import llama2_7b
-        model = llama2_7b()
-        model.to(device="cpu")
-        from torchao.quantization.quant_api import change_linear_weights_to_int4_woqtensors
-        vocab_size = 32000
-        bsz = 2
-        seq_len = 100
-        example_inputs = torch.randint(0, vocab_size, (bsz, seq_len)).to(device="cpu")
-        import time
-        start = time.time()
-        model(example_inputs)
-        end = time.time()
-        print("fp32 time:", end - start)
+    def forward(self, attn_weights):
+        attn_weights = self.linear(attn_weights)  
+        return attn_weights
 
-        change_linear_weights_to_int4_woqtensors(model)
+def test_pt2e_quant():
+    with torch.no_grad():
+        model = M().eval()
+        x = torch.randn(2, 1024)
+        example_inputs = (x,)
+        exported_model = capture_pre_autograd_graph(
+            model,
+            example_inputs
+        )
 
-        start = time.time()
-        model(example_inputs)
-        end = time.time()
-        print("unlowered cpu time:", end - start)
-        with torch.no_grad():
-            model = torch.compile(model, mode="max-autotune")
-            for _ in range(2):
-                # warm up
-                model(example_inputs)
+        print("exported_model is: {}".format(exported_model), flush=True)
 
-            ITER = 10
-            t = 0.0
-            for _ in range(ITER):
-                start = time.time()
-                model(example_inputs.to(device="cpu"))
-                end = time.time()
-                print("lowered cpu time:", end - start)
-                t += end - start
-            print("avg cpu time:", t / ITER)
+        # Create X86InductorQuantizer
+        quantizer = xiq.X86InductorQuantizer()
+        quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+        # PT2E Quantization flow
+        prepared_model = prepare_pt2e(exported_model, quantizer)
+        # Calibration
+        prepared_model(*example_inputs)
+
+        converted_model = convert_pt2e(prepared_model)
+        torch.ao.quantization.move_exported_model_to_eval(converted_model)
+        print("converted_model is: {}".format(converted_model.linear_scale_0.size()), flush=True)
+
+def torchao_GPTQ_int4():
+    pass
 
 if __name__ == "__main__":
-    test_int4_wo_on_torch_tune_model_cpu()
+    test_pt2e_quant()
