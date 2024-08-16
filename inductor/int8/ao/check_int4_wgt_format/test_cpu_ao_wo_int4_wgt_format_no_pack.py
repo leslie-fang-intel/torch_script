@@ -123,9 +123,9 @@ def torchao_GPTQ_int4():
         qmodel = Int4WeightOnlyQuantizer(device=torch.device("cpu")).quantize(model)
         true_res = qmodel(x)
         dq_b = check_int4_wgt_wo_pack(ref_weight, qmodel.linear.weight, qmodel.linear.scales_and_zeros)
-        print("ref_res is: {}".format(ref_res), flush=True)
-        print("true_res is: {}".format(true_res), flush=True)
-        print("true_res2 is: {}".format(torch.matmul(x, dq_b)), flush=True)
+        print("ref_res is: {}".format(ref_res), flush=True)  # FP32
+        print("true_res is: {}".format(true_res), flush=True) # WOQ Kernel 
+        print("true_res2 is: {}".format(torch.matmul(x, dq_b)), flush=True) # Ref WOQ Kernel
         # print(torch.allclose(ref_res, true_res, rtol=0.01, atol=0.01), flush=True)
 
 if __name__ == "__main__":
