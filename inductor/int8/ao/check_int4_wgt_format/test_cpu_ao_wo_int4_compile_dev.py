@@ -26,26 +26,26 @@ torch.manual_seed(local_seed) # Set PyTorch seed
 np.random.seed(seed=local_seed) # Set Numpy seed
 random.seed(local_seed) # Set the Python see
 
-# Single Thread: Better than ATen
-# 56 Multi Thread: Better than ATen
+# Single Thread: Worse than ATen
+# Multi Thread: 
 M0 = 2
 N0 = 16
 K0 = 256  # K should be multiple of 256 GroupSize
 
 # Single Thread: Worse than ATen
-# 56 Multi Thread: Worse than ATen
+# Multi Thread: 
 M0 = 2
 N0 = 4096
 K0 = 1024
 
 # Single Thread: Better than ATen
-# 56 Multi Thread: Better than ATen
+# Multi Thread: 
 M0 = 4096
 N0 = 4096
 K0 = 1024 
 
-# Single Thread: Better than ATen
-# 56 Multi Thread: Better than ATen
+# Single Thread: Better
+# Multi Thread: 
 M0 = 1024
 N0 = 16384
 K0 = 4096 
@@ -187,14 +187,46 @@ def torchao_GPTQ_int4():
         ref_res = model.to(torch.bfloat16)(x.to(torch.bfloat16)).to(torch.float32)
         qmodel = Int4WeightOnlyQuantizer(device=torch.device("cpu")).quantize(model)
         true_res = qmodel(x)
+        unpack_b, dq_b = check_int4_wgt_wo_pack(ref_weight, qmodel.linear.weight, qmodel.linear.scales_and_zeros)
+        # true_res2 = torch.matmul(x, dq_b)
+        
+        print("--- start true_res2", flush=True)
+
+        true_res2 = torch.ops.aten._weight_int4pack_mm(
+            x.to(torch.bfloat16),
+            torch.ops.aten._convert_weight_to_int4pack(unpack_b.view(torch.uint8), 8),
+            256, # qGroupSize
+            qmodel.linear.scales_and_zeros,
+        ).to(torch.float32)
+
+        print("--- start true_res3", flush=True)
+        true_res3 = torch.zeros(M0, N0, dtype=torch.bfloat16)
+        ref_int4_gemm(
+            x.to(torch.bfloat16),
+            unpack_b,
+            qmodel.linear.scales_and_zeros,
+            true_res3,
+            256, # qGroupSize
+            M0,
+            N0,
+            K0,
+        )
+        true_res3 = true_res3.to(torch.float32)
+        print("--- finish true_res3", flush=True)
     
         cqmodel = torch.compile(qmodel)
         true_res4 = cqmodel(x)
 
         print("ref_res is: {}".format(ref_res), flush=True)  # FP32
         print("true_res is: {}".format(true_res), flush=True) # WOQ Kernel 
+        print("true_res2 is: {}".format(true_res2), flush=True) # DQ->RQ-> WOQ Kernel
+        print("true_res3 is: {}".format(true_res3), flush=True) # DQ -> Ref WOQ Kernel
         print("true_res4 is: {}".format(true_res4), flush=True) # WOQ GEMM Template
         print(torch.allclose(ref_res, true_res, rtol=0.01, atol=0.01), flush=True)
+        print(torch.allclose(ref_res, true_res2, rtol=0.01, atol=0.01), flush=True)
+        print(torch.allclose(ref_res, true_res3, rtol=0.01, atol=0.01), flush=True)
+        print(torch.allclose(true_res, true_res2, rtol=0.01, atol=0.01), flush=True)
+        print(torch.allclose(true_res, true_res3, rtol=0.1, atol=0.01), flush=True)
         print(torch.allclose(true_res, true_res4, rtol=0.1, atol=0.01), flush=True)
         torch.testing.assert_close(true_res, true_res4, rtol=0.1, atol=0.01)
     
