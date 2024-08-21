@@ -22,6 +22,9 @@ async_compile = AsyncCompile()
 
 local_seed = 2024
 
+# torch._inductor.config.cpp.simdlen = 256
+
+
 torch.manual_seed(local_seed) # Set PyTorch seed
 np.random.seed(seed=local_seed) # Set Numpy seed
 random.seed(local_seed) # Set the Python see
@@ -32,23 +35,42 @@ M0 = 2
 N0 = 16
 K0 = 256  # K should be multiple of 256 GroupSize
 
-# Single Thread: Worse than ATen
-# 56 Multi Thread: Worse than ATen
-M0 = 2
-N0 = 4096
-K0 = 1024
+# # Single Thread: Worse than ATen
+# # 56 Multi Thread: Worse than ATen
+# M0 = 2
+# N0 = 4096
+# K0 = 1024
 
-# Single Thread: Better than ATen
-# 56 Multi Thread: Better than ATen
-M0 = 4096
-N0 = 4096
-K0 = 1024 
+# # Single Thread: Better than ATen
+# # 56 Multi Thread: Better than ATen
+# M0 = 4096
+# N0 = 4096
+# K0 = 1024 
 
-# Single Thread: Better than ATen
-# 56 Multi Thread: Better than ATen
-M0 = 1024
-N0 = 16384
-K0 = 4096 
+# # Single Thread: Better than ATen
+# # 56 Multi Thread: Better than ATen
+# M0 = 1024
+# N0 = 16384
+# K0 = 4096 
+
+# ## shapes in TorchChat
+# # Single Thread: Worse than ATen
+# # 56 Multi Thread: Worse than ATen
+# M0 = 1
+# N0 = 4096
+# K0 = 4096 
+
+# M0 = 1
+# N0 = 1024
+# K0 = 4096 
+
+# M0 = 1
+# N0 = 14336
+# K0 = 4096 
+
+# M0 = 1
+# N0 = 4096
+# K0 = 14336 
 
 ref_int4_gemm = async_compile.cpp_pybinding(['const bfloat16*', 'const int*', 'const bfloat16*', 'bfloat16*', 'long', 'long', 'long', 'long'], '''
 #include "/localdisk/leslie/torch_inductor_community/pytorch/torch/_inductor/codegen/cpp_prefix.h"
