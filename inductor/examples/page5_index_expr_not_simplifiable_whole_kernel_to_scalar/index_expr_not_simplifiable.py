@@ -1,0 +1,3 @@
+## PyTorch: 7a694f66835ab18512a723c1761f2945c831416f
+## Scalar kernel: rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC=0 TORCH_LOGS="+output_code" TORCH_COMPILE_DEBUG=1 numactl -C 56-111 --membind=1 python benchmarks/dynamo/torchbench.py --performance --amp -dcpu -n50 --no-skip --dashboard --only hf_Longformer --inference --freezing --timeout 9000 --backend=inductor --output=/tmp/inductor_single_test_mt.csv 2>&1 | tee test.log
+# Disable heuristic: + TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC=0
