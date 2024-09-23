@@ -1,0 +1,12 @@
+Refer to https://github.com/DefTruth/CUDA-Learn-Notes/blob/main/elementwise
+Refer to `pytorch/torch/utils/cpp_extension.py`
+
+## CUDA
+```
+export TORCH_CUDA_ARCH_LIST=Ada  # 指定架构
+export CUDA_HOME=/usr/local/cuda-12.1
+python elementwise.py
+
+for example:
+clear && TORCH_CUDA_ARCH_LIST=Ampere CUDA_HOME=/usr/local/cuda-12.1 python elementwise.py
+```
