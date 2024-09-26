@@ -60,6 +60,13 @@ shapes = (
     (16128, 32000, 4096),
 )
 
+shapes = (
+    # (8, 4096, 4096),
+    # (8, 11008, 4096),
+    # (8, 4096, 11008),
+    (8, 32000, 4096),
+)
+
 class Model(torch.nn.Module):
     def __init__(self, M, N, k):
         super().__init__()
@@ -96,12 +103,15 @@ if __name__ == "__main__":
         spamwriter = csv.writer(csvfile, delimiter=',')
         spamwriter.writerow(['shape', 'M', 'N', 'K', 'Inductor BF16 gemm template', 'IPEX WOQ INT8', 'Inductor WOQ INT8'])
         for shape in shapes:
+
+            torch._dynamo.reset()
+
             result = [shape,]
             M, N, K = shape
             result.extend(shape)
             m = Model(M, N, K).eval()
-            input = torch.randn(M, K)
-            input2 = torch.randn(M, N)
+            input = torch.randn(M, K).to(torch.bfloat16)
+            input2 = torch.randn(M, N).to(torch.bfloat16)
             with torch.autocast(device_type="cpu"), torch.no_grad():
 
                 # BF16 Run
