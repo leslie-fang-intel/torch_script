@@ -24,81 +24,169 @@ empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
 alloc_from_pool = torch.ops.inductor._alloc_from_pool
 async_compile = AsyncCompile()
-_frozen_param2 = None  # device(type='cpu') torch.float32 (32, 64) (64, 1) 7f01386eb7a0
-_frozen_param3 = None  # device(type='cpu') torch.float32 (1982689, 1) (1, 0) 7f01386eb930
-constant1 = None  # device(type='cpu') torch.float32 (1, 64, 32) (2048, 32, 1) 7f0136653160
+_frozen_param2 = None  # device(type='cpu') torch.bfloat16 (11008, 4096) (1, 0) 7fbf86cd54e0
+constant1 = None  # device(type='cpu') torch.bfloat16 (344, 4096, 32) (131072, 32, 1) 7fbf862ae610
 
 
-cpp_fused_mm_silu_0 = async_compile.cpp_pybinding(['const float*', 'const float*', 'float*'], '''
-#include "/tmp/torchinductor_leslie/ry/crynakhy4ck65vvjipzokdqspabbzphssxigto7ew3ix25chni3o.h"
+cpp_fused_silu_0 = async_compile.cpp_pybinding(['const bfloat16*', 'const bfloat16*', 'bfloat16*'], '''
+#include "/home/leslie/lz/pytorch/torch/_inductor/codegen/cpp_prefix.h"
 #include <c10/util/Unroll.h>
 
 
 
-template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
-inline void kernel_micro_gemm_kernel(
-    const float* __restrict__ A,
-    const float* __restrict__ B,
+template <bool accum>
+inline void kernel_micro_gemm_amx_kernel_32_2(
+    AMXState& amx_state,
+    const bfloat16* __restrict__ A,
+    const bfloat16* __restrict__ B,
     float* __restrict__ C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc
+    int64_t ldc,
+    uint8_t tilecfg_rows
 ) {
-    using Vectorized = at::vec::Vectorized<float>;
-    using VectorizedIn = at::vec::Vectorized<float>;
-    constexpr auto VLEN = Vectorized::size();
-    constexpr auto ROWS = BLOCK_M;
-    constexpr auto COLS = BLOCK_N / VLEN;
-
-    Vectorized va;
-    at::vec::VectorizedN<float, COLS> vb;
-    at::vec::VectorizedN<float, ROWS*COLS> vc;
-
-    auto loadc = [&](auto i) {
-        if constexpr (accum) {
-            constexpr int row = i / COLS;
-            constexpr int col = i % COLS;
-            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
-        } else {
-            vc[i] = Vectorized(0.0f);
-        }
+    // TODO(jgong5): add prefetch hint for A, B, C
+    auto loadconfig = [](const amx_tilecfg& cfg) {
+        _tile_loadconfig(&cfg);
     };
-    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
-
-    auto compute = [&, COLS](auto i, int k) {
-        constexpr int row = i / COLS;
-        constexpr int col = i % COLS;
-
-        if constexpr (col == 0) {
-            va = Vectorized(static_cast<float>(A[row * lda + k]));
-        }
-
-        if constexpr (row == 0) {
-            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
-        }
-
-        constexpr int idx = row * COLS + col;
-        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+    const auto last_k_offset = K / 32 * 32;
+    const auto tail_k_size = K - last_k_offset;
+    if C10_LIKELY (last_k_offset > 0) {
+        amx_state.configure(tilecfg_rows, 64, 32 / 16, 2, loadconfig);
+    } else {
+        amx_state.configure(tilecfg_rows, tail_k_size * sizeof(bfloat16), 32 / 16, 2, loadconfig);
+    }
+    auto load_c = [&]() {
+        _tile_loadd(0, C + 0 * ldc + 0, ldc * sizeof(float));
+        _tile_loadd(1, C + 0 * ldc + 16, ldc * sizeof(float));
+        _tile_loadd(2, C + 16 * ldc + 0, ldc * sizeof(float));
+        _tile_loadd(3, C + 16 * ldc + 16, ldc * sizeof(float));
+    };
+    auto zero_c = [&]() {
+        _tile_zero(0);
+        _tile_zero(1);
+        _tile_zero(2);
+        _tile_zero(3);
     };
 
-    for (int k = 0; k < K; ++k) {
-        c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    if constexpr (accum) {
+        load_c();
+    } else {
+        zero_c();
     }
 
-    // store to C
-    auto storec = [&](auto i) {
-        constexpr int row = i / COLS;
-        constexpr int col = i % COLS;
-        vc[i].store(C + row * ldc + col * VLEN);
+    auto compute = [&](int k) {
+        _tile_stream_loadd(4, A + 0 * lda + k, lda * sizeof(bfloat16));
+        _tile_loadd(6, B + k * ldb + 0, ldb * 2 * sizeof(bfloat16));
+        _tile_dpbf16ps(0, 4, 6);
+        _tile_loadd(7, B + k * ldb + 32, ldb * 2 * sizeof(bfloat16));
+        _tile_dpbf16ps(1, 4, 7);
+        _tile_stream_loadd(5, A + 16 * lda + k, lda * sizeof(bfloat16));
+        _tile_dpbf16ps(2, 5, 6);
+        _tile_dpbf16ps(3, 5, 7);
     };
-    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+
+    #pragma GCC unroll 4
+    for (int k = 0; k < last_k_offset; k += 32) {
+        compute(k);
+    }
+
+    auto store_c = [&]() {
+    // store to C
+        _tile_stored(0, C + 0 * ldc + 0, ldc * sizeof(float));
+        _tile_stored(1, C + 0 * ldc + 16, ldc * sizeof(float));
+        _tile_stored(2, C + 16 * ldc + 0, ldc * sizeof(float));
+        _tile_stored(3, C + 16 * ldc + 16, ldc * sizeof(float));
+    };
+
+    // TODO(jgong5): move tail k computation to separate loopnest to save tile configuration overhead
+    if C10_UNLIKELY (tail_k_size > 0) {
+        if C10_LIKELY (last_k_offset > 0) {
+            store_c();
+            amx_state.configure(tilecfg_rows, tail_k_size * sizeof(bfloat16), 32 / 16, 2, loadconfig);
+            load_c();
+        }
+        compute(last_k_offset);
+    }
+
+    store_c();
+}
+template <bool accum>
+inline void kernel_micro_gemm_amx_kernel_16_2(
+    AMXState& amx_state,
+    const bfloat16* __restrict__ A,
+    const bfloat16* __restrict__ B,
+    float* __restrict__ C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    uint8_t tilecfg_rows
+) {
+    // TODO(jgong5): add prefetch hint for A, B, C
+    auto loadconfig = [](const amx_tilecfg& cfg) {
+        _tile_loadconfig(&cfg);
+    };
+    const auto last_k_offset = K / 32 * 32;
+    const auto tail_k_size = K - last_k_offset;
+    if C10_LIKELY (last_k_offset > 0) {
+        amx_state.configure(tilecfg_rows, 64, 16 / 16, 2, loadconfig);
+    } else {
+        amx_state.configure(tilecfg_rows, tail_k_size * sizeof(bfloat16), 16 / 16, 2, loadconfig);
+    }
+    auto load_c = [&]() {
+        _tile_loadd(0, C + 0 * ldc + 0, ldc * sizeof(float));
+        _tile_loadd(1, C + 0 * ldc + 16, ldc * sizeof(float));
+    };
+    auto zero_c = [&]() {
+        _tile_zero(0);
+        _tile_zero(1);
+    };
+
+    if constexpr (accum) {
+        load_c();
+    } else {
+        zero_c();
+    }
+
+    auto compute = [&](int k) {
+        _tile_stream_loadd(2, A + 0 * lda + k, lda * sizeof(bfloat16));
+        _tile_loadd(3, B + k * ldb + 0, ldb * 2 * sizeof(bfloat16));
+        _tile_dpbf16ps(0, 2, 3);
+        _tile_loadd(4, B + k * ldb + 32, ldb * 2 * sizeof(bfloat16));
+        _tile_dpbf16ps(1, 2, 4);
+    };
+
+    #pragma GCC unroll 4
+    for (int k = 0; k < last_k_offset; k += 32) {
+        compute(k);
+    }
+
+    auto store_c = [&]() {
+    // store to C
+        _tile_stored(0, C + 0 * ldc + 0, ldc * sizeof(float));
+        _tile_stored(1, C + 0 * ldc + 16, ldc * sizeof(float));
+    };
+
+    // TODO(jgong5): move tail k computation to separate loopnest to save tile configuration overhead
+    if C10_UNLIKELY (tail_k_size > 0) {
+        if C10_LIKELY (last_k_offset > 0) {
+            store_c();
+            amx_state.configure(tilecfg_rows, tail_k_size * sizeof(bfloat16), 16 / 16, 2, loadconfig);
+            load_c();
+        }
+        compute(last_k_offset);
+    }
+
+    store_c();
 }
 
 template <bool accum>
 inline void kernel_micro_gemm(
-    const float* __restrict__ A,
-    const float* __restrict__ B,
+    AMXState& amx_state,
+    const bfloat16* __restrict__ A,
+    const bfloat16* __restrict__ B,
     float* __restrict__ C,
     int64_t M,
     int64_t N,
@@ -107,129 +195,81 @@ inline void kernel_micro_gemm(
     int64_t ldb,
     int64_t ldc
 ) {
-    TORCH_CHECK(N % 32 == 0, "N dimension must be multiple of 32");
-    TORCH_CHECK(K % 1 == 0, "K dimension must be multiple of 1");
+    AOTI_TORCH_CHECK(N % 32 == 0, "N dimension must be multiple of 32");
+    AOTI_TORCH_CHECK(K % 2 == 0, "K dimension must be multiple of 2");
     // TODO(jgong5): loop unroll for M and N
-    for (int64_t m = 0; m < M; m += 8) {
-        int64_t block_m = std::min<int64_t>(M - m, 8);
+    for (int64_t m = 0; m < M; m += 32) {
+        int64_t block_m = std::min<int64_t>(M - m, 32);
+        int64_t m_tail = m;
         for (int64_t n = 0; n < N; n += 32) {
-            if (block_m == 8) {
-                kernel_micro_gemm_kernel<8, 32, accum>(
+            if (block_m >= 32) {
+                kernel_micro_gemm_amx_kernel_32_2<accum>(
+                    amx_state,
                     A + m * lda,
                     B + n,
                     C + m * ldc + n,
                     K,
                     lda,
                     ldb,
-                    ldc
+                    ldc,
+                    16
                 );
-            } else {
-                switch (block_m) {
-                case 7:
-                    kernel_micro_gemm_kernel<7, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 6:
-                    kernel_micro_gemm_kernel<6, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 5:
-                    kernel_micro_gemm_kernel<5, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 4:
-                    kernel_micro_gemm_kernel<4, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 3:
-                    kernel_micro_gemm_kernel<3, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 2:
-                    kernel_micro_gemm_kernel<2, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                case 1:
-                    kernel_micro_gemm_kernel<1, 32, accum>(
-                        A + m * lda,
-                        B + n,
-                        C + m * ldc + n,
-                        K,
-                        lda,
-                        ldb,
-                        ldc
-                    );
-                    break;
-                default:
-                    TORCH_CHECK(false, "Unsupported block_m: 8");
-                }
+                block_m -= 32;
+                m_tail += 32;
+            }
+            else
+            if (block_m >= 16) {
+                kernel_micro_gemm_amx_kernel_16_2<accum>(
+                    amx_state,
+                    A + m * lda,
+                    B + n,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc,
+                    16
+                );
+                block_m -= 16;
+                m_tail += 16;
+            }
+            if (block_m > 0) {
+                kernel_micro_gemm_amx_kernel_16_2<accum>(
+                    amx_state,
+                    A + m_tail * lda,
+                    B + n,
+                    C + m_tail * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc,
+                    block_m
+                );
             }
         }
     }
 }
 
 extern "C" 
-void kernel(const float* X, const float* W, float* Y)
+void kernel(const bfloat16* X, const bfloat16* W, bfloat16* Y)
 {
 
-    constexpr int64_t num_threads = 56;
-    constexpr int64_t N = 32;
-    constexpr int64_t K = 64;
-    constexpr int64_t Mr = 8;
+    constexpr int64_t num_threads = 32;
+    constexpr int64_t N = 11008;
+    constexpr int64_t K = 4096;
+    constexpr int64_t Mr = 32;
     constexpr int64_t Nr = 32;
-    constexpr int64_t Kr = 1;
+    constexpr int64_t Kr = 32;
     constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
     constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
-    constexpr int64_t M = static_cast<int64_t>(16L);
+    constexpr int64_t M = static_cast<int64_t>(32256L);
     constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
-    constexpr int64_t Mt_blocks = 1;
-    constexpr int64_t Nt_blocks = 1;
-    constexpr int64_t Kt_blocks = 64;
-    constexpr int64_t Mc_blocks = 1;
+    constexpr int64_t Mt_blocks = 126;
+    constexpr int64_t Nt_blocks = 86;
+    constexpr int64_t Kt_blocks = 128;
+    constexpr int64_t Mc_blocks = 4;
     constexpr int64_t Nc_blocks = 1;
-    constexpr int64_t Kc_blocks = 64;
+    constexpr int64_t Kc_blocks = 19;
     constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
     constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
     constexpr int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
@@ -237,11 +277,11 @@ void kernel(const float* X, const float* W, float* Y)
     constexpr int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 
     // make sure all partitions are assigned
-    TORCH_CHECK(
-        Mt_blocks * Nt_blocks * Kt_blocks * 56 >= Mr_blocks * Nr_blocks * Kr_blocks,
+    AOTI_TORCH_CHECK(
+        Mt_blocks * Nt_blocks * Kt_blocks * 32 >= Mr_blocks * Nr_blocks * Kr_blocks,
         "Not all partitions are assigned."
     );
-    #pragma omp parallel num_threads(56)
+    #pragma omp parallel num_threads(32)
     {
         const int tid = omp_get_thread_num();
         const int64_t k_group_id = tid / num_Kt_blocks;
@@ -255,7 +295,7 @@ void kernel(const float* X, const float* W, float* Y)
         const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
         const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
         const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
-
+        AMXState amx_state;
         auto _local_acc_buf = std::make_unique<float[]>(static_cast<int64_t>(Mc_blocks*Mr*Nc_blocks*Nr)); auto local_acc_buf = _local_acc_buf.get();
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
@@ -276,26 +316,28 @@ void kernel(const float* X, const float* W, float* Y)
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
                         if (kc == k_block_start) {
                             kernel_micro_gemm<static_cast<bool>(false)>(
-                                &(X[static_cast<int64_t>(k_start + (64L*m_start))]),
-                                &(W[static_cast<int64_t>((32L*k_start) + (2048L*nci))]),
+                                amx_state,
+                                &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
+                                &(W[static_cast<int64_t>((32L*k_start) + (131072L*nci))]),
                                 &(local_acc_buf[static_cast<int64_t>((Nr*nci) + ((-1L)*Nr*nc))]),
                                 static_cast<int64_t>(m_end + ((-1L)*m_start)),
                                 static_cast<int64_t>(Nr),
                                 static_cast<int64_t>(k_end + ((-1L)*k_start)),
-                                static_cast<int64_t>(64L),
+                                static_cast<int64_t>(4096L),
                                 static_cast<int64_t>(32L),
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
 
                         } else {
                             kernel_micro_gemm<static_cast<bool>(true)>(
-                                &(X[static_cast<int64_t>(k_start + (64L*m_start))]),
-                                &(W[static_cast<int64_t>((32L*k_start) + (2048L*nci))]),
+                                amx_state,
+                                &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
+                                &(W[static_cast<int64_t>((32L*k_start) + (131072L*nci))]),
                                 &(local_acc_buf[static_cast<int64_t>((Nr*nci) + ((-1L)*Nr*nc))]),
                                 static_cast<int64_t>(m_end + ((-1L)*m_start)),
                                 static_cast<int64_t>(Nr),
                                 static_cast<int64_t>(k_end + ((-1L)*k_start)),
-                                static_cast<int64_t>(64L),
+                                static_cast<int64_t>(4096L),
                                 static_cast<int64_t>(32L),
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
@@ -313,14 +355,16 @@ void kernel(const float* X, const float* W, float* Y)
                                 auto tmp0 = at::vec::Vectorized<float>::loadu(local_acc_buf + static_cast<int64_t>(x1 + (Nc_blocks*Nr*x0)), static_cast<int64_t>(16));
                                 auto tmp1 = decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp());
                                 auto tmp2 = tmp0 * tmp1;
-                                tmp2.store(Y + static_cast<int64_t>(n_start + x1 + (32L*m_start) + (32L*x0)));
+                                auto tmp3 = at::vec::convert<bfloat16>(tmp2);
+                                tmp3.store(Y + static_cast<int64_t>(n_start + x1 + (11008L*m_start) + (11008L*x0)), static_cast<int64_t>(16));
                             }
                             for(int64_t x1=static_cast<int64_t>(16L*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L)))); x1<static_cast<int64_t>(n_end + ((-1L)*n_start)); x1+=(static_cast<int64_t>(n_end + ((-1L)*n_start) + ((-16L)*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L))))) == 0 ? 1 : static_cast<int64_t>(n_end + ((-1L)*n_start) + ((-16L)*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L)))))))
                             {
                                 auto tmp0 = at::vec::Vectorized<float>::loadu(local_acc_buf + static_cast<int64_t>(x1 + (Nc_blocks*Nr*x0)), static_cast<int64_t>(n_end + ((-1L)*n_start) + ((-16L)*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L))))));
                                 auto tmp1 = decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp());
                                 auto tmp2 = tmp0 * tmp1;
-                                tmp2.store(Y + static_cast<int64_t>(n_start + x1 + (32L*m_start) + (32L*x0)), static_cast<int64_t>(n_end + ((-1L)*n_start) + ((-16L)*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L))))));
+                                auto tmp3 = at::vec::convert<bfloat16>(tmp2);
+                                tmp3.store(Y + static_cast<int64_t>(n_start + x1 + (11008L*m_start) + (11008L*x0)), static_cast<int64_t>(n_end + ((-1L)*n_start) + ((-16L)*(c10::div_floor_integer(static_cast<int64_t>((n_end + ((-1L)*n_start))), static_cast<int64_t>(16L))))));
                             }
                         }
                     }
@@ -328,7 +372,7 @@ void kernel(const float* X, const float* W, float* Y)
                 }
             }
         }
-
+        amx_state.release([]() { _tile_release(); });
     }
 }
 ''')
@@ -340,21 +384,19 @@ del async_compile
 def call(args):
     arg1_1, = args
     args.clear()
-    assert_size_stride(arg1_1, (16, 64), (64, 1))
-    buf1 = empty_strided_cpu((16, 16), (16, 1), torch.float32)
-    cpp_fused_mm_silu_0(arg1_1, constant1, buf1)
+    assert_size_stride(arg1_1, (32256, 4096), (4096, 1))
+    buf0 = empty_strided_cpu((32256, 11008), (11008, 1), torch.bfloat16)
+    cpp_fused_silu_0(arg1_1, constant1, buf0)
     del arg1_1
-    return (buf1, )
+    return (buf0, )
 
 
 def benchmark_compiled_module(times=10, repeat=10):
     from torch._dynamo.testing import rand_strided
     from torch._inductor.utils import print_performance
-    global _frozen_param3
-    _frozen_param3 = rand_strided((1982689, 1), (1, 0), device='cpu', dtype=torch.float32)
     global constant1
-    constant1 = rand_strided((1, 64, 32), (2048, 32, 1), device='cpu', dtype=torch.float32)
-    arg1_1 = rand_strided((16, 64), (64, 1), device='cpu', dtype=torch.float32)
+    constant1 = rand_strided((344, 4096, 32), (131072, 32, 1), device='cpu', dtype=torch.bfloat16)
+    arg1_1 = rand_strided((32256, 4096), (4096, 1), device='cpu', dtype=torch.bfloat16)
     fn = lambda: call([arg1_1])
     return print_performance(fn, times=times, repeat=repeat)
 
