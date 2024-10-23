@@ -470,7 +470,7 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                 {
                     // silu-mul epilogues
 
-  kernel_micro_gemm_silu_mul_epilogue_fusion<static_cast<bool>(false), static_cast<bool>(false)>(&(local_acc_buf[static_cast<int64_t>(0L)]), &(local_acc_buf2[static_cast<int64_t>(0L)]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), static_cast<int64_t>(m_end + ((-1L)*m_start)), static_cast<int64_t>(n_end + ((-1L)*n_start)), static_cast<int64_t>(Nc_blocks*Nr), static_cast<int64_t>(11008L));
+    kernel_micro_gemm_silu_mul_epilogue_fusion<static_cast<bool>(false), static_cast<bool>(false)>(&(local_acc_buf[static_cast<int64_t>(0L)]), &(local_acc_buf2[static_cast<int64_t>(0L)]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), &(Y[static_cast<int64_t>(n_start + (11008L*m_start))]), static_cast<int64_t>(m_end + ((-1L)*m_start)), static_cast<int64_t>(n_end + ((-1L)*n_start)), static_cast<int64_t>(Nc_blocks*Nr), static_cast<int64_t>(11008L));
 
                 }
             }
@@ -533,7 +533,15 @@ def benchmark_compiled_module(times=10, repeat=10):
     # print("res is: {}".format(res), flush=True)
 
     print(torch.allclose(ref_res, res, atol=5e-2, rtol=5e-2), flush=True)
-    
+
+    vtune = True
+    if vtune:
+        #Start Vtune
+        import time
+        import subprocess
+        subprocess.Popen(["bash", "/home/leslie/runtime/vtune_prof.sh", "test"])
+        time.sleep(3)
+
     return print_performance(fn, times=times, repeat=repeat)
 
 

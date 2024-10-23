@@ -404,6 +404,7 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
                         if (kc == k_block_start) {
+
                             kernel_micro_gemm<static_cast<bool>(false)>(
                                 amx_state,
                                 &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
@@ -417,6 +418,7 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
 
+                                              
                             kernel_micro_gemm<static_cast<bool>(false)>(
                                 amx_state,
                                 &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
@@ -429,8 +431,10 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                                 static_cast<int64_t>(32L),
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
+
 
                         } else {
+
                             kernel_micro_gemm<static_cast<bool>(true)>(
                                 amx_state,
                                 &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
@@ -444,6 +448,7 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
 
+
                             kernel_micro_gemm<static_cast<bool>(true)>(
                                 amx_state,
                                 &(X[static_cast<int64_t>(k_start + (4096L*m_start))]),
@@ -456,6 +461,7 @@ void kernel(const bfloat16* X, const bfloat16* W, const bfloat16* W1, bfloat16* 
                                 static_cast<int64_t>(32L),
                                 static_cast<int64_t>(Nc_blocks*Nr)
                             );
+
 
                         }
                     }
@@ -488,6 +494,13 @@ def call(args):
     return (buf0, )
 
 
+def get_ref_res(x, W, W1):
+    x1 = torch.nn.functional.linear(x, W.transpose(0, 1).contiguous())
+    x1 = torch.nn.functional.silu(x1)
+    x2 = torch.nn.functional.linear(x, W1.transpose(0, 1).contiguous())
+    return x1 * x2
+
+
 def benchmark_compiled_module(times=10, repeat=10):
     from torch._dynamo.testing import rand_strided
     from torch._inductor.utils import print_performance
@@ -496,11 +509,31 @@ def benchmark_compiled_module(times=10, repeat=10):
     global _frozen_param5
     _frozen_param5 = rand_strided((11008, 4096), (1, 0), device='cpu', dtype=torch.bfloat16)
     global constant2
-    constant2 = rand_strided((344, 4096, 32), (131072, 32, 1), device='cpu', dtype=torch.bfloat16)
+    # constant2 = rand_strided((344, 4096, 32), (131072, 32, 1), device='cpu', dtype=torch.bfloat16)
+    W = rand_strided((4096, 11008), (11008, 1), device='cpu', dtype=torch.bfloat16) # K * N
+    block_n = 32
+    vnni_size = 2
+    constant2 = W.reshape(4096, 11008 // block_n, block_n).transpose(0, 1).contiguous()
+    constant2 = constant2.view(11008 // block_n, 4096 // vnni_size, vnni_size, block_n).transpose(-1, -2).contiguous().view(11008 // block_n, 4096, block_n)
+
     global constant3
-    constant3 = rand_strided((344, 4096, 32), (131072, 32, 1), device='cpu', dtype=torch.bfloat16)
+    # constant3 = rand_strided((344, 4096, 32), (131072, 32, 1), device='cpu', dtype=torch.bfloat16)
+    W1 = rand_strided((4096, 11008), (11008, 1), device='cpu', dtype=torch.bfloat16) # K * N
+    constant3 = W1.reshape(4096, 11008 // block_n, block_n).transpose(0, 1).contiguous()
+    constant3 = constant3.view(11008 // block_n, 4096 // vnni_size, vnni_size, block_n).transpose(-1, -2).contiguous().view(11008 // block_n, 4096, block_n)
+
     arg2_1 = rand_strided((32256, 4096), (4096, 1), device='cpu', dtype=torch.bfloat16)
+    
     fn = lambda: call([arg2_1])
+    
+    ref_res = get_ref_res(arg2_1, W, W1)
+    res = fn()[0]
+
+    # print("ref_res is: {}".format(ref_res), flush=True)
+    # print("res is: {}".format(res), flush=True)
+
+    print(torch.allclose(ref_res, res, atol=5e-2, rtol=5e-2), flush=True)
+    
     return print_performance(fn, times=times, repeat=repeat)
 
 
