@@ -20,13 +20,13 @@ shapes = [
     (4 * 4 * 2016, 11008, 4096),
 ]
 
-shapes = [
-    # BS: 1, input: 1024, output: 128 Next token
-    (4, 11008, 4096),
+# shapes = [
+#     # BS: 1, input: 1024, output: 128 Next token
+#     (4, 11008, 4096),
 
-    # BS: 4, input: 2016, output: 32 First token
-    # (4 * 4 * 2016, 11008, 4096),
-]
+#     # BS: 4, input: 2016, output: 32 First token
+#     # (4 * 4 * 2016, 11008, 4096),
+# ]
 
 test_ipex = True
 test_aten = True
@@ -34,7 +34,7 @@ test_template = True
 test_tempate_fusion = True
 
 log_file = "/home/leslie/lz/torch_script/inductor/gemm_template/linear_silu_linear_mul/test.log"
-base_cmd = "rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size {0} --in-features {1} --out-features {2}"
+base_cmd_wo_shape = "rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size {0} --in-features {1} --out-features {2}"
 
 test_only = False  # use small steps
 
@@ -59,6 +59,7 @@ if __name__ == "__main__":
         for shape in shapes:
             M, N, K = shape
             res = [M, N, K, False, False]
+            base_cmd = base_cmd_wo_shape
             base_cmd = base_cmd.format(M, N, K)
 
             # Perf of IPEX
