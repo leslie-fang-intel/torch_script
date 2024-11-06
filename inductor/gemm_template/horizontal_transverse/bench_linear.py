@@ -94,13 +94,13 @@ if args.verbose:
 class M(torch.nn.Module):
     def __init__(self, bias):
         super().__init__()
-        # self.linear = torch.nn.Linear(in_features, out_features, bias)
-        self.gate_proj = torch.nn.Linear(in_features, out_features, bias=bias)
-        self.up_proj = torch.nn.Linear(in_features, out_features, bias=bias)
+        self.linear = torch.nn.Linear(in_features, out_features, bias)
+        # self.gate_proj = torch.nn.Linear(in_features, out_features, bias=bias)
+        # self.up_proj = torch.nn.Linear(in_features, out_features, bias=bias)
 
     def forward(self, x):
-        # return self.linear(x)
-        return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+        return self.linear(x)
+        # return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
 
 mods = []
 for _ in range(args.count):
@@ -168,12 +168,19 @@ with torch.no_grad(), patch.object(select_algorithm, "VERIFY", dict(atol=1e-2, r
         with memray.Tracker(args.memray, trace_python_allocators=True):
             result = torch.compile(mods[0], mode="max-autotune")(v[0])
     else:
-        if args.ipex:
-            result = mods[0](v[0])
-        else:
-            result = torch.compile(mods[0], mode="max-autotune")(v[0])
+        result = torch.compile(mods[0], mode="max-autotune")(v[0])
     ref = mods[0](v[0])
+
+    print("---- ref is: {}".format(ref), flush=True)
+    print("---- result is: {}".format(result), flush=True)
+
     assert torch.allclose(result, ref, atol=3e-2, rtol=3e-2)
+
+
+    # exit(-1)
+    print("---- finish -----", flush=True)
+
+
 
     benchmark(run_ipex if args.ipex else run_compiled, v, args.warmup)
     if args.vtune:
