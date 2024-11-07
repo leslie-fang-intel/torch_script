@@ -11,8 +11,8 @@ shapes = [
 ]
 
 test_ipex = True
-test_aten = True
-test_template = True
+test_aten = False
+test_template = False
 test_tempate_fusion = True
 test_tempate_fusion_horizontal = True
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
             M, N, K = shape
             res = [M, N, K, False, False]
             base_cmd = base_cmd_wo_shape
-            base_cmd = base_cmd.format(M, N, K)
+            base_cmd = base_cmd.format(M, K, N)
 
             # Perf of IPEX
             if test_ipex:
