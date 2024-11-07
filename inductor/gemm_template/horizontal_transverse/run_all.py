@@ -22,15 +22,28 @@ shapes = [
     (8064, 12288, 4096),
     (8064, 4096, 11008),
     (8064, 32000, 4096),
+    # typical case
+    (2048, 2048, 8192),
 ]
 
-def parse_log(log_file, result):
+shapes = [
+    (8064, 4096, 11008),
+    (8064, 32000, 4096),
+]
+test_vectical = True
+test_horizontal = True
+
+def test(cmd, res, log_file):
+    os.system("rm -rf {}".format(log_file))
+    # if test_only:
+    #     cmd += " --warmup 5 --run 10 --count 1"
+    os.system("{0} 2>&1 | tee {1}".format(cmd, log_file))
     with open(log_file, 'r', newline='') as file:
         lines = file.readlines()
         for line in lines:
             if "GEMM" in line:
                 time = line.strip().split("compile:")[1].strip().split("ms")[0].strip()
-                result.append(time)
+                res.append(time)
                 break
 
 if __name__ == "__main__":
@@ -38,16 +51,22 @@ if __name__ == "__main__":
     prefix = "rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && numactl -C 96-127 -m 3 python -u bench_linear.py "
     with open("result.csv", "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        field = ["M", "N", "K", "perf"]
+        field = ["M", "N", "K", "vertical(ms)", "horizontal(ms)"]
         writer.writerow(field)
         for shape in shapes:
             result = []
-            os.system("rm -rf {}".format(log_file))
             m, n, k = shape
             result.extend((m, n, k))
-            cmd = prefix + "--verbose --batch-size {0} --in-features {1} --out-features {2} --horizontal".format(m, k, n)
-            cmd += " 2>&1 | tee {}".format(log_file)
-            print("cmd is: {}".format(cmd), flush=True)
-            os.system(cmd)
-            parse_log(log_file, result)
+
+            if test_vectical:
+                cmd = prefix + " --verbose --batch-size {0} --in-features {1} --out-features {2} --cpp ".format(m, k, n)
+                test(cmd, result, log_file)
+            else:
+                result.append(0.0)
+
+            if test_horizontal:
+                cmd = prefix + " --verbose --batch-size {0} --in-features {1} --out-features {2} --cpp --horizontal".format(m, k, n)
+                test(cmd, result, log_file)
+            else:
+                result.append(0.0)
             writer.writerow(result)

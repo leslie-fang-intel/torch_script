@@ -61,20 +61,20 @@ if __name__ == "__main__":
 
             # Perf of Torch Template
             if test_template:
-                cmd = base_cmd
+                cmd = base_cmd + " --cpp"
                 test(cmd, res)
             else:
                 res.append(0.0)
 
             # Perf of Torch Template with Fusion
             if test_tempate_fusion:
-                cmd = base_cmd + " --fusion"
+                cmd = base_cmd + " --cpp --fusion"
                 test(cmd, res)        
             else:
                 res.append(0.0)
 
             if test_tempate_fusion_horizontal:
-                cmd = base_cmd + " --fusion --horizontal"
+                cmd = base_cmd + " --cpp --fusion --horizontal"
                 test(cmd, res)        
             else:
                 res.append(0.0)
