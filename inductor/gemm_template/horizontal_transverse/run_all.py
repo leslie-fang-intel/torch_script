@@ -24,11 +24,6 @@ shapes = [
     (8064, 32000, 4096),
 ]
 
-# shapes = [
-#     (4, 12288, 4096),
-#     (4, 4096, 11008),
-# ]
-
 def parse_log(log_file, result):
     with open(log_file, 'r', newline='') as file:
         lines = file.readlines()
@@ -39,7 +34,8 @@ def parse_log(log_file, result):
                 break
 
 if __name__ == "__main__":
-    log_file = "./test.log"
+    log_file = "./test_single.log"
+    prefix = "rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && numactl -C 96-127 -m 3 python -u bench_linear.py "
     with open("result.csv", "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         field = ["M", "N", "K", "perf"]
@@ -49,7 +45,7 @@ if __name__ == "__main__":
             os.system("rm -rf {}".format(log_file))
             m, n, k = shape
             result.extend((m, n, k))
-            cmd = "rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size {0} --in-features {1} --out-features {2} --horizontal".format(m, k, n)
+            cmd = prefix + "--verbose --batch-size {0} --in-features {1} --out-features {2} --horizontal".format(m, k, n)
             cmd += " 2>&1 | tee {}".format(log_file)
             print("cmd is: {}".format(cmd), flush=True)
             os.system(cmd)

@@ -9,6 +9,9 @@ shapes = [
     (4 * 1024, 11008, 4096),
     # BS: 1, input: 1024, output: 128 Next token
     (4, 11008, 4096),
+    # (4, 4096, 4096)
+    # (4, 32000, 4096)
+
     # BS: 4, input: 1024, output: 128 First token
     (4 * 4 * 1024, 11008, 4096),
     # BS: 4, input: 1024, output: 128 Next token
@@ -22,8 +25,7 @@ shapes = [
 
 
 shapes = [
-    # BS: 4, input: 2016, output: 32 First token
-    (4 * 4 * 2016, 11008, 4096),
+    (4, 11008, 4096),
 ]
 
 
@@ -44,7 +46,8 @@ class Linear_Gate_Up(torch.nn.Module):
 config.freezing = True
 config.max_autotune = True
 config.max_autotune_gemm_backends = "CPP,ATEN"
-test_ipex = False
+torch._inductor.config.enable_linear_silu_linear_mul = False
+test_ipex = True
 
 if __name__ == "__main__":
 
@@ -89,6 +92,9 @@ if __name__ == "__main__":
                     model.up_proj.weight,
                     model.up_proj.bias,
                 )
+
+                # exit(-1)
+
                 # out_linear_silu = torch.ops.torch_ipex.tpp_linear_silu(
                 #     input, model.gate_proj.weight, model.gate_proj.bias
                 # )
