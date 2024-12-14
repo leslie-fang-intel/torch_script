@@ -20,14 +20,18 @@ class M(torch.nn.Module):
         self.linear1 = torch.nn.Linear(in_features, out_features, bias=bias)
         # self.linear2 = torch.nn.Linear(out_features, out_features, bias=bias)
         self.relu0 = torch.nn.ReLU()
-        # self.silu0 = torch.nn.SiLU()
+        self.silu0 = torch.nn.SiLU()
 
     def forward(self, x, x2):
-        # tmp1 = self.relu0(self.linear0(x))
-        # tmp2 = self.silu0(self.linear1(x2))
-        # return tmp1 + self.linear2(tmp2)
-        return self.linear0(x), self.linear1(x)
+        # return self.linear0(x), self.linear1(x)
         # return self.relu0(self.linear0(x)), self.linear1(x)
+        # return self.linear0(x), self.relu0(self.linear1(x))
+        # return self.relu0(self.linear0(x)), self.relu0(self.linear1(x))
+        # return self.silu0(self.linear0(x)), self.relu0(self.linear1(x))
+
+        tmp1 = self.silu0(self.linear0(x))
+        tmp2 = self.linear1(x)
+        return tmp1 * tmp2, None
 
 if __name__ == "__main__":
     with torch.no_grad():
