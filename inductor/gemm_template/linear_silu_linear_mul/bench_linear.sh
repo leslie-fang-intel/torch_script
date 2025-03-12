@@ -1,0 +1,4 @@
+rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size 32256 --in-features 4096 --out-features 11008 --ipex
+rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size 32256 --in-features 4096 --out-features 11008 --aten
+rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size 32256 --in-features 4096 --out-features 11008
+rm -rf /tmp/torchinductor_leslie/* && rm -rf torch_compile_debug/* && clear && numactl -C 96-127 -m 3 python -u bench_linear.py --verbose --batch-size 32256 --in-features 4096 --out-features 11008 --fusion
