@@ -2,7 +2,10 @@ import torch
 from transformers import TorchAoConfig, AutoModelForCausalLM, AutoTokenizer
 from torchao.quantization import int4_weight_only
 from torchao.dtypes import Int4CPULayout
+import torch._inductor.config as config
 
+config.freezing = True
+# config.max_autotune = True
 
 with torch.no_grad():
     model_name = "meta-llama/Meta-Llama-3-8B"
@@ -34,6 +37,9 @@ with torch.no_grad():
     # Warm up run to record shapes for autoquant
     generate_ids = quantized_model.generate(inputs.input_ids, max_length=100)
     quantized_model.finalize_autoquant()
+
+    print("---- start the second run ----", flush=True)
+    quantized_model.forward = torch.compile(quantized_model.forward)
 
     generate_ids = quantized_model.generate(inputs.input_ids, max_length=100)   
     res = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
