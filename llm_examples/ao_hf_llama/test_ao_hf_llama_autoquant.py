@@ -11,7 +11,7 @@ with torch.no_grad():
     model_name = "meta-llama/Meta-Llama-3-8B"
 
     ## Test 1: AutoQuant
-    quantization_config = TorchAoConfig("autoquant", min_sqnr=None)
+    quantization_config = TorchAoConfig("autoquant")
 
     ## Test 2: WOQ INT4
     ## quant_config = int4_weight_only(group_size=128, layout=Int4CPULayout(), set_inductor_config=False)
@@ -19,7 +19,7 @@ with torch.no_grad():
 
     quantized_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype="auto",
+        torch_dtype=torch.bfloat16,
         device_map="cpu",
         quantization_config=quantization_config
     )
@@ -30,18 +30,17 @@ with torch.no_grad():
     # ckpt_id = "llama3-8b-int4wo-128"  # or huggingface hub model id
     # loaded_quantized_model = AutoModelForCausalLM.from_pretrained(ckpt_id, device_map="auto", torch_dtype="auto")
 
-
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     prompt = "Hi, how are you today?"
     inputs = tokenizer(prompt, return_tensors="pt")
     # Warm up run to record shapes for autoquant
-    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100)
+    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100, cache_implementation="static")
     quantized_model.finalize_autoquant()
 
     print("---- start the second run ----", flush=True)
     quantized_model.forward = torch.compile(quantized_model.forward)
 
-    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100)   
+    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100, cache_implementation="static")   
     res = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 
     # print("res is: {}".format(res), flush=True)
