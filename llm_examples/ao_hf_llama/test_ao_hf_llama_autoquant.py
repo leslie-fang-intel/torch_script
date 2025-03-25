@@ -24,12 +24,6 @@ with torch.no_grad():
         quantization_config=quantization_config
     )
 
-    # output_dir = "llama3-8b-int4wo-128"
-    # quantized_model.save_pretrained(output_dir, safe_serialization=False)
-
-    # ckpt_id = "llama3-8b-int4wo-128"  # or huggingface hub model id
-    # loaded_quantized_model = AutoModelForCausalLM.from_pretrained(ckpt_id, device_map="auto", torch_dtype="auto")
-
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     prompt = "Hi, how are you today?"
     inputs = tokenizer(prompt, return_tensors="pt")
@@ -40,7 +34,10 @@ with torch.no_grad():
     print("---- start the second run ----", flush=True)
     quantized_model.forward = torch.compile(quantized_model.forward)
 
-    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100, cache_implementation="static")   
+    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100, cache_implementation="static")
+
+    print("---- start the thrid run ----", flush=True)
+    generate_ids = quantized_model.generate(inputs.input_ids, max_length=100, cache_implementation="static")
     res = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 
     # print("res is: {}".format(res), flush=True)
