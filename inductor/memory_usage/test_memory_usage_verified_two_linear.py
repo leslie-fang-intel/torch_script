@@ -115,5 +115,8 @@ if __name__ == "__main__":
             gc.collect()
             time.sleep(10)
             print("After first run psutil.virtual_memory() is: {}".format(psutil.virtual_memory()), flush=True)
+        
+        print("---- start the second run after release memory ----", flush=True)
+        cfn(x)
 
         print("Done", flush=True)
