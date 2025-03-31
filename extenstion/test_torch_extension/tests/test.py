@@ -1,7 +1,7 @@
 import torch
-import torchao
-import torchao.ops
-# import test_ll_extension
+# import torchao
+# import torchao.ops
+# # import test_ll_extension
 
 if __name__ == "__main__":
     shape = (4096, 11008)
@@ -27,6 +27,17 @@ if __name__ == "__main__":
     import test_ll_extension.ops
 
     res2 = torch.ops.torchll.toy_test_ll(t)
+
+    a = torch.randn((1, 1024), dtype=torch.float32).to("xpu")
+
+    ref_res = a + a
+    res3 = torch.ops.torchll.toy_test_sycl_ll(a, a)
+
+    print("ref_res is: {}".format(ref_res), flush=True)
+    print("res3 is: {}".format(res3), flush=True)
+
+    print(torch.testing.assert_allclose(ref_res, res3), flush=True)
+    print(torch.allclose(ref_res, res3), flush=True)
 
     # print("Res is: {}".format(res), flush=True)
     print("Done ----", flush=True)

@@ -9,20 +9,23 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
     IS_WINDOWS,
     ROCM_HOME,
+    SYCL_HOME,
     BuildExtension,
     CppExtension,
     CUDAExtension,
+    SyclExtension,
     _get_cuda_arch_flags,
 )
 
 
 def get_extensions():
+    print("---- SYCL_HOME is: {}".format(SYCL_HOME), flush=True)
     PY3_9_HEXCODE = "0x03090000"
     debug_mode = False
     extra_link_args = []
 
     extra_compile_args = {
-        "cxx": [f"-DPy_LIMITED_API={PY3_9_HEXCODE}", "-O3", "-fdiagnostics-color=always"],
+        "cxx": [f"-DPy_LIMITED_API={PY3_9_HEXCODE}", "-O3", "-fdiagnostics-color=always", '-g', '-std=c++20', '-fPIC'],
         "nvcc": [
             "-DNDEBUG" if not debug_mode else "-DDEBUG",
             "-O3" if not debug_mode else "-O0",
@@ -36,14 +39,18 @@ def get_extensions():
         CUDA_HOME is not None or ROCM_HOME is not None
     )
     extension = CUDAExtension if use_cuda else CppExtension
+    if SYCL_HOME:
+        extension = SyclExtension
 
     extensions_dir = "test_ll_extension/csrc/"
     sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
+    sources += list(glob.glob(os.path.join(extensions_dir, "**/*.sycl"), recursive=True))
 
     ext = extension(
         "test_ll_extension._C",  # 生成的 Python 模块名
         sources,  # C++ 源文件路径
         py_limited_api=True,
+        include_dirs=["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",],
         extra_compile_args=extra_compile_args,  # 额外的编译参数
         extra_link_args=extra_link_args,
     )
