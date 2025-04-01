@@ -3,7 +3,6 @@ import glob
 import os
 import pybind11
 import shutil
-
 import torch
 from torch.utils.cpp_extension import (
     CUDA_HOME,
@@ -16,14 +15,14 @@ from torch.utils.cpp_extension import (
     SyclExtension,
     _get_cuda_arch_flags,
 )
+from pathlib import Path
 
+package_name = "test_ll_extension"
 
 def get_extensions():
-    print("---- SYCL_HOME is: {}".format(SYCL_HOME), flush=True)
     PY3_9_HEXCODE = "0x03090000"
     debug_mode = False
     extra_link_args = []
-
     extra_compile_args = {
         "cxx": [f"-DPy_LIMITED_API={PY3_9_HEXCODE}", "-O3", "-fdiagnostics-color=always", '-g', '-std=c++20', '-fPIC'],
         "nvcc": [
@@ -33,7 +32,6 @@ def get_extensions():
             "-std=c++17",
         ],
     }
-    # extra_compile_args = ["-std=c++11"]
 
     use_cuda = torch.cuda.is_available() and (
         CUDA_HOME is not None or ROCM_HOME is not None
@@ -42,21 +40,26 @@ def get_extensions():
     if SYCL_HOME:
         extension = SyclExtension
 
-    extensions_dir = "test_ll_extension/csrc/"
+    extensions_dir = f"{package_name}/csrc"
     sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
     sources += list(glob.glob(os.path.join(extensions_dir, "**/*.sycl"), recursive=True))
 
+    # Option 1: since torch xpu ops didn't expose these helpers to submit, we hardcode the path here
+    # may copy it into the projection
+    include_dirs=["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",]
+    
+    # Option 2: Copy the comm header into this project and include it
+    # include_dirs=[f"{Path(__file__).parent.resolve()}/{package_name}/csrc/sycl",]
+    
     ext = extension(
-        "test_ll_extension._C",  # 生成的 Python 模块名
-        sources,  # C++ 源文件路径
+        f"{package_name}._C",  # module name of extension
+        sources,  # C++ source code files
         py_limited_api=True,
-        include_dirs=["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",],
-        extra_compile_args=extra_compile_args,  # 额外的编译参数
+        include_dirs=include_dirs,
+        extra_compile_args=extra_compile_args,  # extra compile flag
         extra_link_args=extra_link_args,
     )
-    ext_modules = [
-        ext
-    ]
+    ext_modules = [ext,]
 
     return ext_modules
 
@@ -77,23 +80,20 @@ class CustomCleanCommand(Command):
 
     def run(self):
         # Standard clean tasks (removes build directories)
-        build_dirs = ['build', 'dist', 'test_ll_extension.egg-info']
+        build_dirs = ['build', 'dist', f'{package_name}.egg-info']
         for build_dir in build_dirs:
             if os.path.exists(build_dir):
-                print(f"Removing {build_dir}...")
                 shutil.rmtree(build_dir)
         
-        # You can add custom clean-up logic here
-        temp_files = ['test_ll_extension/example.cpython-310-x86_64-linux-gnu.so', 'test_ll_extension/_C.abi3.so']  # Example temporary files
-        for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                print(f"Removing {temp_file}...")
-                os.remove(temp_file)
-
-        print("Custom clean process complete!")
+        # Clean all the so of extension
+        so_dir = Path(__file__).parent/package_name
+        so_files = list(so_dir.glob("*.so"))
+        for so_file in so_files:
+            if os.path.exists(so_file.resolve()):
+                os.remove(so_file.resolve())
 
 setup(
-    name="test_ll_extension",  # Project name
+    name=package_name,  # Project name
     version="0.1.0",  # Initial version
     author="Leslie Fang",
     packages=find_packages(),  # Automatically find all packages
@@ -102,19 +102,4 @@ setup(
         'clean': CustomCleanCommand,  # Register our custom clean command
         'build_ext': BuildExtension,
     },
-    # install_requires=[
-    #     "numpy>=1.21.0",
-    #     "requests",
-    # ],  # Dependencies from PyPI
-    # classifiers=[
-    #     "Programming Language :: Python :: 3",
-    #     "License :: OSI Approved :: MIT License",
-    #     "Operating System :: OS Independent",
-    # ],
-    # python_requires=">=3.7",
-    # entry_points={
-    #     "console_scripts": [
-    #         "my_project=my_project.module1:main",  # CLI command
-    #     ],
-    # },
 )
