@@ -3,8 +3,6 @@
 #include <comm/xpu_aten.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
-#include <ATen/native/xpu/sycl/NMSKernel.h>
-#include <ATen/native/xpu/sycl/TestLLKernel.h>
 #include <torch/library.h>
 
 namespace at {
