@@ -1,0 +1,76 @@
+#include <ATen/AccumulateType.h>
+#include <comm/SYCLContext.h>
+#include <comm/xpu_aten.h>
+
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/xpu/sycl/NMSKernel.h>
+#include <ATen/native/xpu/sycl/TestLLKernel.h>
+#include <torch/library.h>
+
+namespace at {
+namespace native {
+namespace xpu {
+
+template <typename scalar_t>
+struct TestLL : public __SYCL_KER_CONFIG_CONVENTION__ {
+  void operator()(sycl::nd_item<3> item) const {
+    auto global_x = item.get_global_id(0);
+    auto global_y = item.get_global_id(1);
+    auto global_z = item.get_global_id(2);
+
+    // auto _out = sycl::stream(65536, 256, cgh);
+    // out << "global_x is: " << global_x << " " << global_y << " " << global_z
+    //     << sycl::endl;
+    if (global_z < 1024) {
+      out_ptr[global_z] = act_ptr[global_z] + weight_ptr[global_z];
+    }
+  }
+
+  void sycl_ker_config_convention(sycl::handler& cgh) {
+    // local_data_ = sycl_local_acc_t<accscalar_t, 3>(
+    //     sycl::range<3>{
+    //         (size_t)block_row_, (size_t)local_size_, (size_t)vec_size},
+    //     cgh);
+    // _out = sycl::stream(65536, 256, cgh);
+  }
+
+  TestLL(scalar_t* act_ptr, scalar_t* weight_ptr, scalar_t* out_ptr)
+      : act_ptr(act_ptr), weight_ptr(weight_ptr), out_ptr(out_ptr) {
+    // auto& queue = at::xpu::getCurrentSYCLQueue();
+  }
+
+ private:
+  scalar_t* act_ptr;
+  scalar_t* weight_ptr;
+  scalar_t* out_ptr;
+};
+
+Tensor testll_kernel(Tensor act, Tensor weight) {
+  sycl::range<3> global_range{(size_t)1, (size_t)1, (size_t)1024};
+  sycl::range<3> local_range{(size_t)1, (size_t)1, (size_t)32};
+
+  std::cout << "---- inside test_ll ----" << std::endl;
+
+  Tensor out = at::empty_like(act);
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16,
+      at::ScalarType::Half,
+      act.scalar_type(),
+      "test_ll_kernel",
+      [&] {
+        auto& queue = at::xpu::getCurrentSYCLQueue();
+        auto act_ptr = act.data_ptr<scalar_t>();
+        auto weight_ptr = weight.data_ptr<scalar_t>();
+        auto out_ptr = out.data_ptr<scalar_t>();
+        auto kfn = TestLL<scalar_t>(act_ptr, weight_ptr, out_ptr);
+        std::cout << "---- start to submit ----" << std::endl;
+        sycl_kernel_submit(global_range, local_range, queue, kfn);
+      });
+
+  return out;
+}
+
+} // namespace xpu
+} // namespace native
+} // namespace at
