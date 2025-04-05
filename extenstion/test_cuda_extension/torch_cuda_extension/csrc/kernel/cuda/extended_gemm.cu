@@ -2,14 +2,18 @@
 #include <torch/library.h>
 #include <cuda.h>
 #include <cutlass/gemm/device/gemm.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace at {
 namespace native {
 
 void _extended_gemm_kernel(float * a_ptr, float * b_ptr, float * out_ptr, int M, int N, int K, int lda, int ldb, int ldc) {
-  // 创建 CUDA 流
-  cudaStream_t stream;
-  cudaStreamCreate(&stream);
+  // Option 1: 创建 CUDA 流
+  // cudaStream_t stream;
+  // cudaStreamCreate(&stream);
+
+  // Option 2: Use the CUDA Stream from PyTorch
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   using Gemm = cutlass::gemm::device::Gemm<
     float, cutlass::layout::RowMajor,
@@ -33,9 +37,9 @@ void _extended_gemm_kernel(float * a_ptr, float * b_ptr, float * out_ptr, int M,
     std::cerr << "CUTLASS GEMM 计算失败!" << std::endl;
   }
 
-  // 同步 CUDA Stream
-  cudaStreamSynchronize(stream);
-  cudaStreamDestroy(stream);
+  // // 同步 CUDA Stream
+  // cudaStreamSynchronize(stream);
+  // cudaStreamDestroy(stream);
 }
 
 Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out) {
