@@ -2,19 +2,26 @@
 #include <torch/library.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 #include "kernel/cuda/extended_add.h"
+#include "kernel/cuda/extended_gemm.h"
 
 namespace at {
 namespace native {
 
 Tensor extended_add(Tensor a, Tensor b) {
-  // return at::add(a, b);
   Tensor out = at::empty_like(a);
   extended_add_kernel(a, b, out);
   return out;
 }
 
+Tensor extended_gemm(Tensor a, Tensor b) {
+  Tensor out = at::empty({a.size(0), b.size(1)}, a.options());
+  extended_gemm_kernel(a, b, out);
+  return out;
+}
+
 TORCH_LIBRARY_IMPL(torch_cuda_extension, CUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("extended_add"), TORCH_FN(extended_add));
+  m.impl(TORCH_SELECTIVE_NAME("extended_gemm"), TORCH_FN(extended_gemm));
 }
 
 } // namespace native

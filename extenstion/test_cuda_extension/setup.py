@@ -3,6 +3,7 @@ import glob
 import os
 import pybind11
 import shutil
+from pathlib import Path
 
 import torch
 from torch.utils.cpp_extension import (
@@ -48,8 +49,7 @@ def get_extensions():
     include_dirs = []
     if CUDA_HOME:
         sources += list(glob.glob(os.path.join(extensions_dir, "kernel/cuda/*.cu"), recursive=True))
-        # include_dirs += ["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",]
-        pass
+        include_dirs += [os.path.join(Path(extensions_dir).resolve(), "include/cutlass/include")]
     if SYCL_HOME:
         sources += list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
         sources += list(glob.glob(os.path.join(extensions_dir, "**/*.sycl"), recursive=True))

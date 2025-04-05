@@ -20,9 +20,7 @@ CUDA 12.6
 ## Useage
 Python based
 ```
-import torch
-import 
-
-
+cd tests
+python test_extended_add.py
 
 ```
