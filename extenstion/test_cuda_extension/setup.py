@@ -47,11 +47,11 @@ def get_extensions():
     sources = list(glob.glob(os.path.join(extensions_dir, "*.cpp"), recursive=True))
     include_dirs = []
     if CUDA_HOME:
-        # sources = list(glob.glob(os.path.join(extensions_dir, "**/**/*.cu"), recursive=True))
+        sources += list(glob.glob(os.path.join(extensions_dir, "kernel/cuda/*.cu"), recursive=True))
         # include_dirs += ["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",]
         pass
     if SYCL_HOME:
-        sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
+        sources += list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
         sources += list(glob.glob(os.path.join(extensions_dir, "**/*.sycl"), recursive=True))
         include_dirs += ["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",]
 
