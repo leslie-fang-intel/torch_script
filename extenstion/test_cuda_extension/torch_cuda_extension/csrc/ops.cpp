@@ -13,9 +13,13 @@ Tensor extended_add(Tensor a, Tensor b) {
   return out;
 }
 
-Tensor extended_gemm(Tensor a, Tensor b) {
+Tensor extended_gemm(Tensor a, Tensor b, std::string_view epilogue, bool transpose_B) {
   Tensor out = at::empty({a.size(0), b.size(1)}, a.options());
-  extended_gemm_kernel(a, b, out);
+  if (transpose_B) {
+    // B is N * K
+    out = at::empty({a.size(0), b.size(0)}, a.options());
+  }
+  extended_gemm_kernel(a, b, out, epilogue, transpose_B);
   return out;
 }
 
