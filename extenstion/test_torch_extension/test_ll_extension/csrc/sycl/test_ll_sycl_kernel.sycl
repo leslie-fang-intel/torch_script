@@ -5,6 +5,12 @@
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
 
+#if defined(CUTLASS_ENABLE_SYCL)
+#include <cutlass/cutlass.h>
+#include <cutlass/gemm/device/gemm.h>
+#include <cute/tensor.hpp>
+#endif
+
 namespace at {
 namespace native {
 namespace xpu {
@@ -22,6 +28,15 @@ struct TestLL : public __SYCL_KER_CONFIG_CONVENTION__ {
     if (global_z < 1024) {
       out_ptr[global_z] = act_ptr[global_z] + weight_ptr[global_z];
     }
+
+    #if defined(CUTLASS_ENABLE_SYCL)
+      if (global_z == 1023) {
+        auto layout = cute::Layout<cute::Shape<cute::_3, cute::_6>,
+                            cute::Stride<cute::_1, cute::_3>>{};
+        print(layout);
+      }
+    #endif
+
   }
 
   void sycl_ker_config_convention(sycl::handler& cgh) {

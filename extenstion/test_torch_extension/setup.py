@@ -22,9 +22,20 @@ package_name = "test_ll_extension"
 def get_extensions():
     PY3_9_HEXCODE = "0x03090000"
     debug_mode = False
+    use_cutlass = False
+    my_file = Path(os.path.join(Path(f"{package_name}").resolve(), "include/cutlass/include/"))
+    if my_file.is_dir():
+        use_cutlass = True
     extra_link_args = []
     extra_compile_args = {
-        "cxx": [f"-DPy_LIMITED_API={PY3_9_HEXCODE}", "-O3", "-fdiagnostics-color=always", '-g', '-std=c++20', '-fPIC'],
+        "cxx": [
+            f"-DPy_LIMITED_API={PY3_9_HEXCODE}",
+            "-O3",
+            "-fdiagnostics-color=always",
+            '-g',
+            '-std=c++20',
+            '-fPIC',
+        ],
         "nvcc": [
             "-DNDEBUG" if not debug_mode else "-DDEBUG",
             "-O3" if not debug_mode else "-O0",
@@ -32,6 +43,12 @@ def get_extensions():
             "-std=c++17",
         ],
     }
+
+    if use_cutlass:
+        extra_compile_args["sycl"] = [
+            '-DCUTLASS_ENABLE_SYCL=on',
+            '-DDPCPP_SYCL_TARGET=intel_gpu_pvc', 
+        ]
 
     use_cuda = torch.cuda.is_available() and (
         CUDA_HOME is not None or ROCM_HOME is not None
@@ -46,7 +63,14 @@ def get_extensions():
 
     # Option 1: since torch xpu ops didn't expose these helpers to submit, we hardcode the path here
     # may copy it into the projection
-    include_dirs=["/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",]
+    include_dirs=[
+        "/4T-720/leslie/inductor/pytorch/third_party/torch-xpu-ops/src/",
+    ]
+    if use_cutlass:
+        include_dirs += [
+            os.path.join(Path(f"{package_name}").resolve(), "include/cutlass/include/"),
+        ]
+        
     
     # Option 2: Copy the comm header into this project and include it
     # include_dirs=[f"{Path(__file__).parent.resolve()}/{package_name}/csrc/sycl",]
