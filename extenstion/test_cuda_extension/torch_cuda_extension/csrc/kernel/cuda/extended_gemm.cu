@@ -2,6 +2,7 @@
 #include <torch/library.h>
 #include <cuda.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/Dispatch.h>
 
 #include <cutlass/gemm/device/gemm.h>
 #include <cutlass/gemm/threadblock/mma_pipelined.h>
@@ -59,8 +60,17 @@ __global__ void _extended_gemm_block_naive_kernel(float * a_ptr, float * b_ptr, 
     }
 }
 
-template <typename T, int kTileM, int kTileN, int kTileK, typename TiledMMA, bool use_relu>
-__global__ void _extended_gemm_block_cutlass_naive_kernel(T * a_ptr, T * b_ptr, T * out_ptr, int M, int N, int K, int lda, int ldb, int ldc) {
+template <typename T, typename T2, int kTileM, int kTileN, int kTileK, typename TiledMMA, bool use_relu>
+__global__ void _extended_gemm_block_cutlass_naive_kernel(
+  T * a_ptr,
+  T * b_ptr,
+  T2 * out_ptr,
+  int M,
+  int N,
+  int K,
+  int lda,
+  int ldb,
+  int ldc) {
     // 构造CUTE Tensor, size 是总的Tensor    
     cute::Tensor A = cute::make_tensor(cute::make_gmem_ptr(a_ptr), cute::make_shape(M, K), cute::make_stride(K, cute::Int<1>{}));
     cute::Tensor B = cute::make_tensor(cute::make_gmem_ptr(b_ptr), cute::make_shape(N, K), cute::make_stride(K, cute::Int<1>{}));  // Column Major
@@ -110,8 +120,8 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(T * a_ptr, T * b_ptr, 
       // 所以应该就表示了 当前 threadIdx.x 要处理的元素
       CUTE_UNROLL
       for (int i = 0; i < cute::size(tCrC); ++i) {
-          T val = tCrC(i);  // 取出当前值
-          tCrC(i) = (val > T(0)) ? val : T(0);  // 应用 ReLU 操作
+          T2 val = tCrC(i);  // 取出当前值
+          tCrC(i) = (val > T2(0)) ? val : T2(0);  // 应用 ReLU 操作
       }
 
       __syncthreads();
@@ -120,8 +130,32 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(T * a_ptr, T * b_ptr, 
     cute::copy(tCrC, tCgC);
 }
 
-template <bool use_relu>
-void _extended_gemm_kernel_low_level_api(half * a_ptr, half * b_ptr, half * out_ptr, int M, int N, int K, int lda, int ldb, int ldc) {
+template <typename input_dtype, typename output_dtype, bool use_relu, std::enable_if_t<!std::is_same_v<input_dtype, Half>, int> =0>
+void _extended_gemm_kernel_low_level_api(
+  input_dtype * a_ptr,
+  input_dtype * b_ptr,
+  output_dtype * out_ptr,
+  int M,
+  int N,
+  int K,
+  int lda,
+  int ldb,
+  int ldc) {
+  TORCH_CHECK(false, "None Half input not support yet");
+}
+
+
+template <typename input_dtype, typename output_dtype, bool use_relu, std::enable_if_t<std::is_same_v<input_dtype, Half>, int> =0> // std::enable_if_t<std::is_same_v<input_dtype, Half>, int> =0
+void _extended_gemm_kernel_low_level_api(
+  input_dtype * a_ptr,
+  input_dtype * b_ptr,
+  output_dtype * out_ptr,
+  int M,
+  int N,
+  int K,
+  int lda,
+  int ldb,
+  int ldc) {
   constexpr int kTileM = 32;
   constexpr int kTileN = 32;
   constexpr int kTileK = 32;
@@ -143,13 +177,30 @@ void _extended_gemm_kernel_low_level_api(half * a_ptr, half * b_ptr, half * out_
                       make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}), // thr layout
                       make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout
 
-  dim3 grid(grid_n, grid_m);
-  dim3 block(size(MMA{})); // (128, 1, 1), 128 由上面计算推理得到
 
+  using mma_op_fp32 = cute::SM80_16x8x16_F32F16F16F32_TN;
+  using mma_traits_fp32 = cute::MMA_Traits<mma_op_fp32>;
+  using mma_atom_fp32 = cute::MMA_Atom<mma_traits_fp32>;
+  using MMA_fp32 = decltype(make_tiled_mma(mma_atom_fp32{}, 
+                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}), // thr layout
+                      make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout
+
+  dim3 grid(grid_n, grid_m);
+  dim3 block;
   using T = cute::half_t;
-  _extended_gemm_block_cutlass_naive_kernel<T, kTileM, kTileN, kTileK, MMA, use_relu><<<grid, block>>>(
-    (T*)a_ptr, (T*)b_ptr, (T*)out_ptr, M, N, K, lda, ldb, ldc
-  );
+  using T2 = float;
+  if constexpr (std::is_same_v<output_dtype, Half>) {
+    block = dim3(size(MMA{}));
+    _extended_gemm_block_cutlass_naive_kernel<T, T, kTileM, kTileN, kTileK, MMA, use_relu><<<grid, block>>>(
+      (T*)a_ptr, (T*)b_ptr, (T*)out_ptr, M, N, K, lda, ldb, ldc
+    );
+  } else {
+    block = dim3(size(MMA_fp32{}));
+    _extended_gemm_block_cutlass_naive_kernel<T, T2, kTileM, kTileN, kTileK, MMA_fp32, use_relu><<<grid, block>>>(
+      (T*)a_ptr, (T*)b_ptr, (T2*)out_ptr, M, N, K, lda, ldb, ldc
+    );
+  }
+
 }
 
 Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out, std::string_view epilogue, bool transpose_B) {
@@ -175,10 +226,6 @@ Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out, std::string_view epi
       // B is: N x K
       // C is: M x N
 
-      auto a_ptr = a.data_ptr();
-      auto b_ptr = b.data_ptr();
-      auto out_ptr = out.data_ptr();
-
       int M = a.size(0);
       int K = a.size(1);
       int N = b.size(0);
@@ -186,12 +233,21 @@ Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out, std::string_view epi
       int lda = a.size(1);
       int ldb = b.size(1);
       int ldc = out.size(1);
-
-      if (epilogue == "relu") {
-        _extended_gemm_kernel_low_level_api<true>((half*)a_ptr, (half*)b_ptr, (half*)out_ptr, M, N, K, lda, ldb, ldc);
-      } else {
-        _extended_gemm_kernel_low_level_api<false>((half*)a_ptr, (half*)b_ptr, (half*)out_ptr, M, N, K, lda, ldb, ldc);
-      }
+      // std::cout<<std::is_same_v<c10::impl::ScalarTypeToCPPTypeT<at::ScalarType::Half>, Half><<std::endl;
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::BFloat16, at::ScalarType::Half, out.scalar_type(),
+          "_extended_gemm_kernel_low_level_api_kernel_impl",
+          [&] { 
+            // std::cout<<std::is_same_v<scalar_t, Half><<std::endl;
+            Half* a_ptr = a.data_ptr<Half>();
+            Half* b_ptr = b.data_ptr<Half>();
+            scalar_t* out_ptr = out.data_ptr<scalar_t>();
+            if (epilogue == "relu") {
+              _extended_gemm_kernel_low_level_api<Half, scalar_t, true>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+            } else {
+              _extended_gemm_kernel_low_level_api<Half, scalar_t, false>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+            }
+          });
     }
 
     return out;

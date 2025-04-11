@@ -46,12 +46,31 @@ def test_extended_gemm_v2():
         res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B)
         accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-1)
         print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
-        torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
+        # torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
         assert accuracy_check, "accuracy failed to check"
     print("---- Done test_extended_gemm_v2 ----", flush=True)
+
+def test_extended_gemm_float():
+    for epilogue in ["none", "relu"]:
+        shape = (64, 64)
+        a = torch.randn(*shape).to("cuda").to(torch.float16)
+        b = torch.randn(*shape).to("cuda").to(torch.float16)
+        ref_res = torch.mm(a, b).to(torch.float32)
+        if epilogue == "relu":
+            ref_res = torch.nn.functional.relu(ref_res)
+        # Transpose B to column major
+        transpose_B = True
+        b = b.t().contiguous()
+        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, torch.float32)
+        accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-1)
+        print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
+        # torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
+        assert accuracy_check, "accuracy failed to check"
+    print("---- Done test_extended_gemm_float ----", flush=True)
 
 if __name__ == "__main__":
     # TODO<leslie> support pytest
     test_extended_add()
     test_extended_gemm()
     test_extended_gemm_v2()
+    test_extended_gemm_float()

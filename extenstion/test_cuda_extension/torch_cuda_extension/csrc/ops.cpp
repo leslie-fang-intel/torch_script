@@ -13,11 +13,15 @@ Tensor extended_add(Tensor a, Tensor b) {
   return out;
 }
 
-Tensor extended_gemm(Tensor a, Tensor b, std::string_view epilogue, bool transpose_B) {
-  Tensor out = at::empty({a.size(0), b.size(1)}, a.options());
+Tensor extended_gemm(Tensor a, Tensor b, std::string_view epilogue, bool transpose_B, std::optional<ScalarType> output_dtype) {
+  // std::cout<<output_dtype.has_value()<<std::endl;
+  if (!output_dtype.has_value()) {
+    output_dtype = a.scalar_type();
+  }
+  Tensor out = at::empty({a.size(0), b.size(1)}, a.options().dtype(output_dtype));
   if (transpose_B) {
     // B is N * K
-    out = at::empty({a.size(0), b.size(0)}, a.options());
+    out = at::empty({a.size(0), b.size(0)}, a.options().dtype(output_dtype));
   }
   extended_gemm_kernel(a, b, out, epilogue, transpose_B);
   return out;
