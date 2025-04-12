@@ -90,7 +90,10 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     TiledMMA tiled_mma;
     auto thr_mma = tiled_mma.get_slice(threadIdx.x);
 
-    // MMA 表示 tiled_mma 一次的计算大小，
+    // MMA 表示 tiled_mma 单条指令要用到的元素个数
+    //   1. refer to: https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/media/docs/cpp/cute/0x_gemm_tutorial.md#tiledmma
+    //   2. https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/media/docs/cpp/cute/0t_mma_atom.md#type-aliases
+    //      感觉就是 这里的 A，B, C, D 寄存器的大小 对应的元素的个数
     // MMA_M, MMA_K 表示 kTileM, kTileK 按照 tiled_mma 划分需要计算的次数
     // num_tile_k 表示一共有多少个 kTileK
     auto tAgA = thr_mma.partition_A(gA);  // (MMA, MMA_M, MMA_K, num_tile_k)
@@ -168,22 +171,23 @@ void _extended_gemm_kernel_low_level_api(
 
   // mma_op will calculate MNK as 16x8x16，tensor core 作用在warp上，所以是一个warp的32线程 的计算size
   // 创建 tiled mma 通过 make_layout 可以进一步扩展  tiled_mma 计算size
-  // thr layout 表示可以有更多的 warp(线程 来参与 mma计算)， 这里就是 M 维度是2个，N 维度是2个
-  // val layout 表示 在 warp 内部，可以重复参与的mma 计算，这里表示 沿着 N 维度重复2次
+  // param: thr layout 表示可以有更多的 warp(线程 来参与 mma计算)， 这里就是 M 维度是2个，N 维度是2个
+  // param: val layout (**重要** 最新的code 下面 val layout 的参数被移除了) 表示 在 warp 内部，可以重复参与的mma 计算，这里表示 沿着 N 维度重复2次
+  // param: 最后一个参数是 Permutations 被保留了： 
+  //   refer to: https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/include/cute/atom/mma_atom.hpp#L207
   // 综上：
-  // 一共有 4 个 warp，128个线程参与计算
-  // 处理的总的MNK的大小是 M*2, N * 2 * 2, K 一共是 32x32x16
+  // 一共有 4 个 warp，128个线程参与计算, size(MMA{}) 返回的也是这个结构 (32, cute::_2, cute::_2, cute::_1)
   using MMA = decltype(make_tiled_mma(mma_atom{}, 
-                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}), // thr layout
-                      make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout
+                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}))); // thr layout
+                      // make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout has been removed
 
 
   using mma_op_fp32 = cute::SM80_16x8x16_F32F16F16F32_TN;
   using mma_traits_fp32 = cute::MMA_Traits<mma_op_fp32>;
   using mma_atom_fp32 = cute::MMA_Atom<mma_traits_fp32>;
   using MMA_fp32 = decltype(make_tiled_mma(mma_atom_fp32{}, 
-                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}), // thr layout
-                      make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout
+                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}))); // thr layout
+                      // make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout has been removed
 
   dim3 grid(grid_n, grid_m);
   dim3 block;
