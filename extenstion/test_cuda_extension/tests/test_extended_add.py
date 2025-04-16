@@ -25,14 +25,33 @@ def test_extended_gemm():
     a = torch.randn(*shape).to("cuda")
     b = torch.randn(*shape).to("cuda")
     ref_res = torch.mm(a, b)
-    res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B)
+    res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, api_level=0)
     # print("ref_res is: {}".format(ref_res), flush=True)
     # print("res is: {}".format(res), flush=True)
     accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-2)
     print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
     assert accuracy_check, "accuracy failed to check"
 
-def test_extended_gemm_v2():
+def test_extended_gemm_collective():
+    # for epilogue in ["none", "relu"]:
+    for epilogue in ["none",]:
+        shape = (64, 64)
+        a = torch.randn(*shape).to("cuda").to(torch.float16)
+        b = torch.randn(*shape).to("cuda").to(torch.float16)
+        ref_res = torch.mm(a, b)
+        if epilogue == "relu":
+            ref_res = torch.nn.functional.relu(ref_res)
+        # Transpose B to column major
+        transpose_B = True
+        b = b.t().contiguous()
+        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, api_level=1)
+        accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-1)
+        print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
+        # torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
+        assert accuracy_check, "accuracy failed to check"
+    print("---- Done test_extended_gemm_cute ----", flush=True)
+
+def test_extended_gemm_cute():
     for epilogue in ["none", "relu"]:
         shape = (64, 64)
         a = torch.randn(*shape).to("cuda").to(torch.float16)
@@ -43,14 +62,14 @@ def test_extended_gemm_v2():
         # Transpose B to column major
         transpose_B = True
         b = b.t().contiguous()
-        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B)
+        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, api_level=2)
         accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-1)
         print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
         # torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
         assert accuracy_check, "accuracy failed to check"
-    print("---- Done test_extended_gemm_v2 ----", flush=True)
+    print("---- Done test_extended_gemm_cute ----", flush=True)
 
-def test_extended_gemm_float():
+def test_extended_gemm_cute_float():
     for epilogue in ["none", "relu"]:
         shape = (64, 64)
         a = torch.randn(*shape).to("cuda").to(torch.float16)
@@ -61,7 +80,7 @@ def test_extended_gemm_float():
         # Transpose B to column major
         transpose_B = True
         b = b.t().contiguous()
-        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, torch.float32)
+        res = torch.ops.torch_cuda_extension.extended_gemm(a, b, epilogue, transpose_B, torch.float32, api_level=2)
         accuracy_check = torch.allclose(res, ref_res, atol=1e-2, rtol=1e-1)
         print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
         # torch.testing.assert_allclose(res, ref_res, atol=1e-2, rtol=1e-1)
@@ -71,6 +90,13 @@ def test_extended_gemm_float():
 if __name__ == "__main__":
     # TODO<leslie> support pytest
     test_extended_add()
+
+    # Highest level API
     test_extended_gemm()
-    test_extended_gemm_v2()
-    test_extended_gemm_float()
+
+    # Test Collective API
+    # test_extended_gemm_collective()
+
+    # Test Cute API
+    test_extended_gemm_cute()
+    test_extended_gemm_cute_float()

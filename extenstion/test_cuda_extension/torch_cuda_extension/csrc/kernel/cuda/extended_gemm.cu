@@ -9,6 +9,8 @@
 #include <cutlass/gemm/threadblock/default_mma_core.h>
 #include <cutlass/cutlass.h>
 #include <cute/tensor.hpp>
+#include "extended_gemm.h"
+#include "extended_gemm_collective_api.h"
 
 namespace at {
 namespace native {
@@ -207,8 +209,14 @@ void _extended_gemm_kernel_low_level_api(
 
 }
 
-Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out, std::string_view epilogue, bool transpose_B) {
-    if (epilogue == "none" && !transpose_B) {
+Tensor extended_gemm_kernel(
+  Tensor a,
+  Tensor b,
+  Tensor out,
+  std::string_view epilogue,
+  bool transpose_B,
+  int64_t api_level) {
+    if (epilogue == "none" && !transpose_B && api_level == 0) {
       // High level API not support epilogue
       // TODO<leslie> assert the scalar_type is float, and the input tensor is 2D
       auto a_ptr = a.data_ptr();
@@ -224,7 +232,33 @@ Tensor extended_gemm_kernel(Tensor a, Tensor b, Tensor out, std::string_view epi
       int ldc = out.size(1);
 
       _extended_gemm_kernel((float*)a_ptr, (float*)b_ptr, (float*)out_ptr, M, N, K, lda, ldb, ldc);
-    } else {
+    } else if (api_level == 1) {
+      // Collective API
+      int M = a.size(0);
+      int K = a.size(1);
+      int N = b.size(0);
+
+      int lda = a.size(1);
+      int ldb = b.size(1);
+      int ldc = out.size(1);
+      // std::cout<<std::is_same_v<c10::impl::ScalarTypeToCPPTypeT<at::ScalarType::Half>, Half><<std::endl;
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          at::ScalarType::BFloat16, at::ScalarType::Half, out.scalar_type(),
+          "_extended_gemm_kernel_collective_api_kernel_impl",
+          [&] { 
+            // std::cout<<std::is_same_v<scalar_t, Half><<std::endl;
+            Half* a_ptr = a.data_ptr<Half>();
+            Half* b_ptr = b.data_ptr<Half>();
+            scalar_t* out_ptr = out.data_ptr<scalar_t>();
+            if (epilogue == "relu") {
+              _extended_gemm_kernel_collective_api<Half, scalar_t, true>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+            } else {
+              _extended_gemm_kernel_collective_api<Half, scalar_t, false>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+            }
+          });
+    
+    }
+    else {
       // TODO <leslie>: assert transpose_B is True
       // A is: M x K
       // B is: N x K
