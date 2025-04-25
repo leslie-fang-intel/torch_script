@@ -44,7 +44,10 @@ Tensor extended_attention(
   std::optional<double> scale = std::nullopt,
   int64_t api_level = 0) {
   // api_level: 0 - Reference; 1 - Flash Attention; 2 - Cute API;
-  return q;
+  TORCH_CHECK(api_level == 2, "support api_level of 2");
+  Tensor out = at::empty_like(q);
+  extended_attention_kernel(q, k, v, attn_mask, dropout_p, is_causal, scale, out);
+  return out;
 }
 
 TORCH_LIBRARY_IMPL(torch_cuda_extension, CUDA, m) {

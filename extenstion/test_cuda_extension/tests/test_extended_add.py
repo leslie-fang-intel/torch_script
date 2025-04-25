@@ -2,6 +2,7 @@ import torch
 import torch_cuda_extension
 import numpy as np
 import random
+import itertools
 
 local_seed = 2025
 
@@ -88,25 +89,73 @@ def test_extended_gemm_cute_float():
     print("---- Done test_extended_gemm_float ----", flush=True)
 
 def test_extended_attention():
-    dtype = torch.float16
-    size = [32, 8, 128, 64]    
-    query = torch.rand(*size, dtype=dtype, device="cuda")
-    key = torch.rand(*size, dtype=dtype, device="cuda")
-    value = torch.rand(*size, dtype=dtype, device="cuda")
-    with torch.backends.cuda.sdp_kernel(enable_math=False), torch.no_grad():
-        ref_res = torch.nn.functional.scaled_dot_product_attention(query, key, value)
-        res = torch.ops.torch_cuda_extension.extended_attention(
-            query.to(device="cpu"),
-            key.to(device="cpu"),
-            value.to(device="cpu"),
-            api_level=1,
-        )
-        accuracy_check = torch.allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
-        # print(res.to(device="cpu"), flush=True)
-        # print(ref_res.to(device="cpu"), flush=True)
-        # torch.testing.assert_allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
-        print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
-        assert accuracy_check, "accuracy failed to check"
+    dtypes = [torch.float16, torch.float32]
+    mask_type = [0, 1, 2] # None, causal_mask, attn_mask
+    sizes = [
+        # bs, num_head, q/kv_seq_len, head_dim;
+        ([32, 8, 128, 64], [32, 8, 128, 64]), # First Token
+        ([32, 8, 1, 64], [32, 8, 129, 64]), # Next Token
+        ([32, 8, 1, 64], [32, 8, 160, 64]), # Next Token divisible by block size
+    ]
+    api_levels = [0, 1, 2]
+
+    # dtypes = [torch.float16,]
+    # mask_type = [0,] # None, causal_mask, attn_mask
+    # sizes = [
+    #     ([1, 1, 128, 64], [1, 1, 128, 64]), # First Token
+    #     # ([32, 8, 1, 64], [32, 8, 129, 64]), # Next Token
+    #     # ([32, 8, 1, 64], [32, 8, 160, 64]), # Next Token divisible by block size
+    # ]
+    # api_levels = [2,]
+
+    for dtype, _mask_type, (q_size, kv_size), api_level in itertools.product(dtypes, mask_type, sizes, api_levels):
+        if api_level == 2:
+            if (
+                dtype != torch.float16
+                or _mask_type != 0
+            ):
+                continue
+        query = torch.rand(*q_size, dtype=dtype, device="cuda")
+        key = torch.rand(*kv_size, dtype=dtype, device="cuda")
+        value = torch.rand(*kv_size, dtype=dtype, device="cuda")
+        if _mask_type == 0:
+            is_causal = False
+            attn_mask = None
+        elif _mask_type == 1:
+            is_causal = True
+            attn_mask = None
+        else:
+            is_causal = False
+            attn_mask = torch.randn(q_size[2], kv_size[2]).le(torch.zeros(q_size[2], kv_size[2])).to(device=query.device)
+
+        with torch.backends.cuda.sdp_kernel(enable_math=False), torch.no_grad():
+            ref_res = torch.nn.functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                is_causal=is_causal,
+                attn_mask=attn_mask,
+            )
+            if api_level in [0, 1]:
+                query = query.to(device="cpu")
+                key = key.to(device="cpu")
+                value = value.to(device="cpu")
+                attn_mask = None if (attn_mask is None) else attn_mask.to(device="cpu")
+
+            res = torch.ops.torch_cuda_extension.extended_attention(
+                query,
+                key,
+                value,
+                is_causal=is_causal,
+                attn_mask=attn_mask,
+                api_level=api_level,
+            )
+            accuracy_check = torch.allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
+            # print(res.to(device="cpu"), flush=True)
+            # print(ref_res.to(device="cpu"), flush=True)
+            torch.testing.assert_allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
+            print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
+            assert accuracy_check, "accuracy failed to check"
     print("---- Done test_extended_attention ----", flush=True)
 
 if __name__ == "__main__":

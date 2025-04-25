@@ -102,6 +102,10 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     auto tBgB = thr_mma.partition_B(gB);  // (MMA, MMA_N, MMA_K, num_tile_k)
     auto tCgC = thr_mma.partition_C(gC);  // (MMA, MMA_M, MMA_N)
 
+    // if (cute::thread0()) {
+    //   print(tAgA);
+    // }
+
     // 返回寄存器声明
     auto tArA = thr_mma.partition_fragment_A(gA(cute::_, cute::_, 0));  // (MMA, MMA_M, MMA_K)
     auto tBrB = thr_mma.partition_fragment_B(gB(cute::_, cute::_, 0));  // (MMA, MMA_N, MMA_K)
@@ -189,8 +193,8 @@ void _extended_gemm_kernel_low_level_api(
   using mma_traits_fp32 = cute::MMA_Traits<mma_op_fp32>;
   using mma_atom_fp32 = cute::MMA_Atom<mma_traits_fp32>;
   using MMA_fp32 = decltype(make_tiled_mma(mma_atom_fp32{}, 
-                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}))); // thr layout
-                      // make_layout(cute::Shape<cute::_1, cute::_2, cute::_1>{}))); // val layout has been removed
+                      make_layout(cute::Shape<cute::_2, cute::_2, cute::_1>{}), // thr layout
+                      cute::Tile<cute::_32, cute::_16, cute::_16>{})); // permutation
 
   dim3 grid(grid_n, grid_m);
   dim3 block;
