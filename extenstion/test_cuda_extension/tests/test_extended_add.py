@@ -87,6 +87,28 @@ def test_extended_gemm_cute_float():
         assert accuracy_check, "accuracy failed to check"
     print("---- Done test_extended_gemm_float ----", flush=True)
 
+def test_extended_attention():
+    dtype = torch.float16
+    size = [32, 8, 128, 64]    
+    query = torch.rand(*size, dtype=dtype, device="cuda")
+    key = torch.rand(*size, dtype=dtype, device="cuda")
+    value = torch.rand(*size, dtype=dtype, device="cuda")
+    with torch.backends.cuda.sdp_kernel(enable_math=False), torch.no_grad():
+        ref_res = torch.nn.functional.scaled_dot_product_attention(query, key, value)
+        res = torch.ops.torch_cuda_extension.extended_attention(
+            query.to(device="cpu"),
+            key.to(device="cpu"),
+            value.to(device="cpu"),
+            api_level=1,
+        )
+        accuracy_check = torch.allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
+        # print(res.to(device="cpu"), flush=True)
+        # print(ref_res.to(device="cpu"), flush=True)
+        # torch.testing.assert_allclose(res.to(device="cpu"), ref_res.to(device="cpu"), atol=1e-2, rtol=1e-1)
+        print("torch.allclose(res, ref_res) is: {}".format(accuracy_check), flush=True)
+        assert accuracy_check, "accuracy failed to check"
+    print("---- Done test_extended_attention ----", flush=True)
+
 if __name__ == "__main__":
     # TODO<leslie> support pytest
     test_extended_add()
@@ -100,3 +122,6 @@ if __name__ == "__main__":
     # Test Cute API
     test_extended_gemm_cute()
     test_extended_gemm_cute_float()
+
+    # Test Attention
+    test_extended_attention()

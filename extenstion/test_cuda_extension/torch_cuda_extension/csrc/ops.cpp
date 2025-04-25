@@ -3,6 +3,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include "kernel/cuda/extended_add.h"
 #include "kernel/cuda/extended_gemm.h"
+#include "kernel/cuda/extended_attention.h"
 
 namespace at {
 namespace native {
@@ -33,9 +34,23 @@ Tensor extended_gemm(
   return out;
 }
 
+Tensor extended_attention(
+  Tensor q,
+  Tensor k,
+  Tensor v,
+  std::optional<Tensor> attn_mask = std::nullopt,
+  double dropout_p = 0.0,
+  bool is_causal = false,
+  std::optional<double> scale = std::nullopt,
+  int64_t api_level = 0) {
+  // api_level: 0 - Reference; 1 - Flash Attention; 2 - Cute API;
+  return q;
+}
+
 TORCH_LIBRARY_IMPL(torch_cuda_extension, CUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("extended_add"), TORCH_FN(extended_add));
   m.impl(TORCH_SELECTIVE_NAME("extended_gemm"), TORCH_FN(extended_gemm));
+  m.impl(TORCH_SELECTIVE_NAME("extended_attention"), TORCH_FN(extended_attention));
 }
 
 } // namespace native
