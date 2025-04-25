@@ -177,6 +177,7 @@ void _extended_gemm_kernel_low_level_api(
   // param: val layout (**重要** 最新的code 下面 val layout 的参数被移除了) 表示 在 warp 内部，可以重复参与的mma 计算，这里表示 沿着 N 维度重复2次
   // param: 最后一个参数是 Permutations 被保留了： 
   //   refer to: https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/include/cute/atom/mma_atom.hpp#L207
+  //   refer to: https://zhuanlan.zhihu.com/p/28168438940
   // 综上：
   // 一共有 4 个 warp，128个线程参与计算, size(MMA{}) 返回的也是这个结构 (32, cute::_2, cute::_2, cute::_1)
   using MMA = decltype(make_tiled_mma(mma_atom{}, 
