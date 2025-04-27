@@ -333,59 +333,77 @@ template<bool A_in_regs=false, bool B_in_regs=false, typename Tensor0, typename 
          typename Tensor2, typename Tensor3, typename Tensor4,
          typename TiledMma, typename TiledCopyA, typename TiledCopyB,
          typename ThrCopyA, typename ThrCopyB>
-__forceinline__ __device__ void _gemm_gemm(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tCrB, Tensor3 const& tCsA,
-                            Tensor4 const& tCsB, TiledMma tiled_mma,
-                            TiledCopyA smem_tiled_copy_A, TiledCopyB smem_tiled_copy_B,
-                            ThrCopyA smem_thr_copy_A, ThrCopyB smem_thr_copy_B) {
-    using namespace cute;
-    CUTE_STATIC_ASSERT_V(cute::size<1>(tCrA) == cute::size<1>(acc));                     // MMA_M
-    CUTE_STATIC_ASSERT_V(cute::size<1>(tCrB) == cute::size<2>(acc));                     // MMA_N
-    CUTE_STATIC_ASSERT_V(cute::size<2>(tCrA) == cute::size<2>(tCrB));                     // MMA_K
-    cute::Tensor tCrA_copy_view = smem_thr_copy_A.retile_D(tCrA);
-    CUTE_STATIC_ASSERT_V(cute::size<1>(tCsA) == cute::size<1>(tCrA_copy_view));            // M
-    cute::Tensor tCrB_copy_view = smem_thr_copy_B.retile_D(tCrB);
-    CUTE_STATIC_ASSERT_V(cute::size<1>(tCsB) == cute::size<1>(tCrB_copy_view));            // N
-    if (!A_in_regs) { cute::copy(smem_tiled_copy_A, tCsA(_, _, _0{}), tCrA_copy_view(_, _, _0{})); }
-    if (!B_in_regs) { cute::copy(smem_tiled_copy_B, tCsB(_, _, _0{}), tCrB_copy_view(_, _, _0{})); }
-    #pragma unroll
-    for (int i = 0; i < cute::size<2>(tCrA); ++i) {
-        if (i < cute::size<2>(tCrA) - 1) {
-            if (!A_in_regs) { cute::copy(smem_tiled_copy_A, tCsA(_, _, i + 1), tCrA_copy_view(_, _, i + 1)); }
-            if (!B_in_regs) { cute::copy(smem_tiled_copy_B, tCsB(_, _, i + 1), tCrB_copy_view(_, _, i + 1)); }
-        }
-        cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
-    }
+__forceinline__ __device__ void _gemm_gemm(
+  Tensor0 &acc,
+  Tensor1 &tCrA, Tensor2 &tCrB, Tensor3 const& tCsA,
+  Tensor4 const& tCsB, TiledMma tiled_mma,
+  TiledCopyA smem_tiled_copy_A, TiledCopyB smem_tiled_copy_B,
+  ThrCopyA smem_thr_copy_A, ThrCopyB smem_thr_copy_B) {
+  using namespace cute;
+  CUTE_STATIC_ASSERT_V(cute::size<1>(tCrA) == cute::size<1>(acc));                     // MMA_M
+  CUTE_STATIC_ASSERT_V(cute::size<1>(tCrB) == cute::size<2>(acc));                     // MMA_N
+  CUTE_STATIC_ASSERT_V(cute::size<2>(tCrA) == cute::size<2>(tCrB));                     // MMA_K
+  cute::Tensor tCrA_copy_view = smem_thr_copy_A.retile_D(tCrA);
+  CUTE_STATIC_ASSERT_V(cute::size<1>(tCsA) == cute::size<1>(tCrA_copy_view));            // M
+  cute::Tensor tCrB_copy_view = smem_thr_copy_B.retile_D(tCrB);
+  CUTE_STATIC_ASSERT_V(cute::size<1>(tCsB) == cute::size<1>(tCrB_copy_view));            // N
+  if (!A_in_regs) { cute::copy(smem_tiled_copy_A, tCsA(_, _, _0{}), tCrA_copy_view(_, _, _0{})); }
+  if (!B_in_regs) { cute::copy(smem_tiled_copy_B, tCsB(_, _, _0{}), tCrB_copy_view(_, _, _0{})); }
+
+  // if (cute::thread0()) {
+  //   printf("---- \n");
+  //   print(cute::size<2>(tCrA));
+  //   printf("---- \n");
+  //   printf("A_in_regs is %d \n", A_in_regs);
+  //   printf("---- \n");
+  // }
+
+  #pragma unroll
+  for (int i = 0; i < cute::size<2>(tCrA); ++i) {
+      if (i < cute::size<2>(tCrA) - 1) {
+          if (!A_in_regs) { cute::copy(smem_tiled_copy_A, tCsA(_, _, i + 1), tCrA_copy_view(_, _, i + 1)); }
+          if (!B_in_regs) { cute::copy(smem_tiled_copy_B, tCsB(_, _, i + 1), tCrB_copy_view(_, _, i + 1)); }
+      }
+      cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
+  }
 }
 
 template <bool Is_even_MN=true, bool Is_even_K=true, bool Clear_OOB_MN=false, bool Clear_OOB_K=true,
           typename TiledCopy, typename Engine0, typename Layout0, typename Engine1, typename Layout1,
           typename Engine2, typename Layout2, typename Engine3, typename Layout3>
-__forceinline__ __device__ void _copy_copy(TiledCopy tiled_copy, cute::Tensor<Engine0, Layout0> const &S,
-                            cute::Tensor<Engine1, Layout1> &D, cute::Tensor<Engine2, Layout2> const &identity_MN,
-                            cute::Tensor<Engine3, Layout3> const &predicate_K, const int max_MN=0) {
-    using namespace cute;
-    CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
-    CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
-    CUTE_STATIC_ASSERT_V(cute::size<0>(S) == cute::size<0>(D));                     // MMA
-    CUTE_STATIC_ASSERT_V(cute::size<1>(S) == cute::size<1>(D));                     // MMA_M
-    CUTE_STATIC_ASSERT_V(cute::size<2>(S) == cute::size<2>(D));                     // MMA_K
-    // There's no case where !Clear_OOB_K && Clear_OOB_MN
-    static_assert(!(Clear_OOB_MN && !Clear_OOB_K));
-    #pragma unroll
-    for (int m = 0; m < cute::size<1>(S); ++m) {
-        if (Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN) {
-            #pragma unroll
-            for (int k = 0; k < cute::size<2>(S); ++k) {
-                if (Is_even_K || predicate_K(k)) {
-                    cute::copy(tiled_copy, S(_, m, k), D(_, m, k));
-                } else if (Clear_OOB_K) {
-                    cute::clear(D(_, m, k));
-                }
-            }
-        } else if (Clear_OOB_MN) {
-            cute::clear(D(_, m, _));
-        }
-    }
+__forceinline__ __device__ void _copy_copy(
+  TiledCopy tiled_copy,
+  cute::Tensor<Engine0, Layout0> const &S,
+  cute::Tensor<Engine1, Layout1> &D,
+  cute::Tensor<Engine2, Layout2> const &identity_MN,
+  cute::Tensor<Engine3, Layout3> const &predicate_K,
+  const int max_MN=0) {
+  using namespace cute;
+  CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
+  CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
+  CUTE_STATIC_ASSERT_V(cute::size<0>(S) == cute::size<0>(D));                     // MMA
+  CUTE_STATIC_ASSERT_V(cute::size<1>(S) == cute::size<1>(D));                     // MMA_M
+  CUTE_STATIC_ASSERT_V(cute::size<2>(S) == cute::size<2>(D));                     // MMA_K
+  // There's no case where !Clear_OOB_K && Clear_OOB_MN
+  static_assert(!(Clear_OOB_MN && !Clear_OOB_K));
+
+  #pragma unroll
+  for (int m = 0; m < cute::size<1>(S); ++m) {
+      if (Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN) {
+          #pragma unroll
+          for (int k = 0; k < cute::size<2>(S); ++k) {
+              if (Is_even_K || predicate_K(k)) {
+                  cute::copy(tiled_copy, S(_, m, k), D(_, m, k));
+              }
+              // else if (Clear_OOB_K) {
+              //     cute::clear(D(_, m, k));
+              // }
+          }
+      }
+      // else if (Clear_OOB_MN) {
+      //     cute::clear(D(_, m, _));
+      // }
+  }
 }
 
 template<typename MMA_traits, typename Layout>
@@ -479,12 +497,6 @@ __global__ void _extended_attention_kernel_impl(
     printf(" ------ q_head_stride is: %ld \n", q_head_stride);
     printf(" ------ k_row_stride is: %ld \n", k_row_stride);
     printf(" ------ k_head_stride is: %ld \n", k_head_stride);
-
-    static constexpr int kBlockKSmem = 64;
-    static constexpr int kBlockKGmem = 64;
-    static constexpr int kSwizzle = 3;
-    static constexpr int kBlockM = 128;
-    static constexpr int kHeadDim = 64;
   }
 
   // q
@@ -545,7 +557,7 @@ __global__ void _extended_attention_kernel_impl(
   cute::Tensor tKVpKV = make_tensor<bool>(make_shape(cute::size<2>(tKsK)));
 
   cute::Tensor acc_o = partition_fragment_C(tiled_mma, cute::Shape<Int<q_split_size>, Int<head_dim>>{});  // MMA, MMA_M, MMA_K
-
+  clear(acc_o);
   Softmax<2 * cute::size<1>(acc_o)> softmax;
 
   using SmemCopyAtom = Copy_Atom<SM75_U32x4_LDSM_N, cutlass::half_t>;
@@ -563,6 +575,14 @@ __global__ void _extended_attention_kernel_impl(
   auto smem_thr_copy_V = smem_tiled_copy_V.get_thread_slice(tidx);
   cute::Tensor tOsVt = smem_thr_copy_V.partition_S(sVt);
 
+  // Copy Q from (gQ) HBM to (sQ) share local memory
+  // Copy from tQgQ to tQsQ
+  _copy_copy<true, true>(gmem_tiled_copy_QKV, tQgQ, tQsQ, tQcQ, tQpQ, q_seq_len - q_block_id * q_split_size);
+  // Copy K from (gK) HBM to (sK) share local memory
+  // Copy from tKgK to tKsK
+  _copy_copy<true, true>(gmem_tiled_copy_QKV, tKgK(_, _, _, n_block), tKsK, tKVcKV, tKVpKV, kv_seq_len - n_block * kv_split_size);
+  cute::cp_async_fence();
+
   constexpr int n_masking_steps = 1;
   #pragma unroll
   for (int masking_step = 0; masking_step < n_masking_steps; ++masking_step, --n_block) {
@@ -571,12 +591,23 @@ __global__ void _extended_attention_kernel_impl(
       _cp_async_wait<0>();
       __syncthreads();
 
+      // Copy V from (gV) HBM to (sV) share local memory 
+      // Copy from tVgV to tVsV
       _copy_copy<true, true, /*Clear_OOB_MN=*/true>(
-          gmem_tiled_copy_QKV, tVgV(_, _, _, n_block), tVsV, tKVcKV, tKVpKV, kv_seq_len - n_block * kv_split_size
+          gmem_tiled_copy_QKV,
+          tVgV(_, _, _, n_block),
+          tVsV,
+          tKVcKV,
+          tKVpKV,
+          kv_seq_len - n_block * kv_split_size
       );
 
       cute::cp_async_fence();
 
+      // Copy from share local memory to register
+      // * tSsQ -> tSrQ
+      // * tSsK -> tSrK
+      // Do GEMM
       _gemm_gemm<false>(
           acc_s, tSrQ, tSrK, tSsQ, tSsK, tiled_mma, smem_tiled_copy_Q, smem_tiled_copy_K,
           smem_thr_copy_Q, smem_thr_copy_K

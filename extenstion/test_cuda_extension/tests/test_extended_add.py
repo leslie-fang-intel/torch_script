@@ -155,6 +155,7 @@ def test_extended_attention_cute():
     mask_type = [0,] # None, causal_mask, attn_mask
     sizes = [
         ([1, 1, 128, 64], [1, 1, 128, 64]), # First Token
+        ([32, 8, 128, 64], [32, 8, 128, 64]), # First Token
     ]
     api_levels = [2,]
 
