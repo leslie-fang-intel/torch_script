@@ -45,8 +45,9 @@ Tensor extended_attention(
   int64_t api_level = 0) {
   // api_level: 0 - Reference; 1 - Flash Attention; 2 - Cute API;
   TORCH_CHECK(api_level == 2, "support api_level of 2");
-  Tensor out = at::empty_like(q);
-  extended_attention_kernel(q, k, v, attn_mask, dropout_p, is_causal, scale, out);
+  // Tensor out = at::empty_like(q);
+  // std::cout<<"out is: "<<out<<std::endl;
+  Tensor out = extended_attention_kernel(q, k, v, attn_mask, dropout_p, is_causal, scale);
   return out;
 }
 
