@@ -95,7 +95,29 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     // MMA 表示 tiled_mma 单条指令要用到的元素个数
     //   1. refer to: https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/media/docs/cpp/cute/0x_gemm_tutorial.md#tiledmma
     //   2. https://github.com/NVIDIA/cutlass/blob/5e497243f7ad13a2aa842143f9b10bbb23d98292/media/docs/cpp/cute/0t_mma_atom.md#type-aliases
-    //      感觉就是 这里的 A，B, C, D 寄存器的大小 对应的元素的个数
+    //      就是 汇编代码 这里的 A，B, C, D 寄存器的大小 对应的元素的个数
+    //      以 SM80_16x8x16_F32F16F16F32_TN 为例子：https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm80.hpp
+    //      print(tAgA) 看到 MMA 是(2, 2, 2) 表示 这个线程 会处理 8 = 16*16/32 (M*K/num_thread_of_warp)个 A 的元素，
+    //        对应了汇编代码中的 a0-a3 x 32bit 寄存器 共 8 * fp16
+    //      print(tBgB) 看到 MMA 是(2, 2) 表示 这个线程 会处理 4 = 8*16/32 (N*K/num_thread_of_warp)个 B 的元素，
+    //        对应了汇编代码中的 b0-b1 x 32bit 寄存器 共 4 * fp16
+    //      print(tCgC) 看到 MMA 是(2, 2) 表示 这个线程 会处理 4 = 8*16/32 (N*K/num_thread_of_warp)个 C 的元素，
+    //        对应了汇编代码中的 c0-c3 x 32bit 寄存器 共 4 * fp32
+    //      A, B, C 矩阵 每个线程具体操作的元素排布: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-float
+    //      * tAgA gmem_ptr[16b](0x7f5ff3208000) o ((_2,_2,_2),_1,_2,4):((_1,1024,_8),_0,_16,_32)
+    //        * 先看 size
+    //          * 首先 (_2,_2,_2) 每个线程 分到 8个元素，4 组 每组 2个 {a0, a1}, {a2, a3}, {a4, a5}, {a6, a7}
+    //          * 再看 _1, kTileM (32) 需要 1个 tiled_mma (32)
+    //          * 再看 _2, kTileK (32) 需要 2个 tiled_mma (16)
+    //          * 再看 4 (注意这个4是动态的，和真实K大小相关), 整个K 是128， 需要4个 kTileK
+    //        * 再看 stride
+    //          * (_1,1024,_8)
+    //             * _1 因为 a0 a1 的间隔是 1
+    //             * 1024 （注意是动态的 和K相关），a0 和 a2 差了 8行，每行K(128) 个元素，1024 = 8 * K （128）
+    //             * _8, a0 和 a4 之间的间隔是8
+    //          * _0, MMA_M 的size 就是1，不需要stride
+    //          * _16, MMA_K 两个 tiled_mma 之间 沿着 K 维度 间隔了 16个元素
+    //          * _32, 两个 kTileK 之间 沿着 K 维度间隔了 32个元素
     // MMA_M, MMA_K 表示 kTileM, kTileK 按照 tiled_mma 划分需要计算的次数
     // num_tile_k 表示一共有多少个 kTileK
     auto tAgA = thr_mma.partition_A(gA);  // (MMA, MMA_M, MMA_K, num_tile_k)
@@ -103,7 +125,13 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     auto tCgC = thr_mma.partition_C(gC);  // (MMA, MMA_M, MMA_N)
 
     // if (cute::thread0()) {
+    //   printf("\n");
     //   print(tAgA);
+    //   printf("\n");
+    //   print(tBgB);
+    //   printf("\n");
+    //   print(tCgC);
+    //   printf("\n");
     // }
 
     // 返回寄存器声明
@@ -200,15 +228,15 @@ void _extended_gemm_kernel_low_level_api(
   dim3 block;
   using T = cute::half_t;
   using T2 = float;
-  if constexpr (std::is_same_v<output_dtype, Half>) {
+  if constexpr (std::is_same_v<output_dtype, at::Half>) {
     block = dim3(size(MMA{}));
     _extended_gemm_block_cutlass_naive_kernel<T, T, kTileM, kTileN, kTileK, MMA, use_relu><<<grid, block>>>(
-      (T*)a_ptr, (T*)b_ptr, (T*)out_ptr, M, N, K, lda, ldb, ldc
+      reinterpret_cast<T*>(a_ptr), reinterpret_cast<T*>(b_ptr), reinterpret_cast<T*>(out_ptr), M, N, K, lda, ldb, ldc
     );
   } else {
     block = dim3(size(MMA_fp32{}));
     _extended_gemm_block_cutlass_naive_kernel<T, T2, kTileM, kTileN, kTileK, MMA_fp32, use_relu><<<grid, block>>>(
-      (T*)a_ptr, (T*)b_ptr, (T2*)out_ptr, M, N, K, lda, ldb, ldc
+      reinterpret_cast<T*>(a_ptr), reinterpret_cast<T*>(b_ptr), (T2*)out_ptr, M, N, K, lda, ldb, ldc
     );
   }
 
@@ -264,10 +292,10 @@ Tensor extended_gemm_kernel(
     
     }
     else {
-      // TODO <leslie>: assert transpose_B is True
       // A is: M x K
       // B is: N x K
       // C is: M x N
+      TORCH_CHECK(transpose_B, "for cute api, transpose_B must be true");
 
       int M = a.size(0);
       int K = a.size(1);
@@ -282,13 +310,13 @@ Tensor extended_gemm_kernel(
           "_extended_gemm_kernel_low_level_api_kernel_impl",
           [&] { 
             // std::cout<<std::is_same_v<scalar_t, Half><<std::endl;
-            Half* a_ptr = a.data_ptr<Half>();
-            Half* b_ptr = b.data_ptr<Half>();
+            at::Half* a_ptr = a.data_ptr<at::Half>();
+            at::Half* b_ptr = b.data_ptr<at::Half>();
             scalar_t* out_ptr = out.data_ptr<scalar_t>();
             if (epilogue == "relu") {
-              _extended_gemm_kernel_low_level_api<Half, scalar_t, true>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+              _extended_gemm_kernel_low_level_api<at::Half, scalar_t, true>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
             } else {
-              _extended_gemm_kernel_low_level_api<Half, scalar_t, false>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
+              _extended_gemm_kernel_low_level_api<at::Half, scalar_t, false>(a_ptr, b_ptr, out_ptr, M, N, K, lda, ldb, ldc);
             }
           });
     }
