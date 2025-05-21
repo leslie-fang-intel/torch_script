@@ -185,14 +185,79 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     int iy = blockIdx.y;  // M 维度
 
     // Copy data from HBM to SLM
-    // <TODO> Leslie: Substitue with tiledCopy
     extern __shared__ cute::half_t shared_array[];
-    auto num_thread = blockDim.x;
-    int num_element_to_copy_per_thread = kTileM * K / num_thread;
-    int start_idx = threadIdx.x * num_element_to_copy_per_thread;
-    for (int i = 0; i < num_element_to_copy_per_thread ; i++) {
-      shared_array[start_idx + i] = *(a_ptr + iy * kTileM * K + start_idx + i);
+
+    // // Option 1: Navie Copy from HBM to SLM
+    // auto num_thread = blockDim.x;
+    // int num_element_to_copy_per_thread = kTileM * K / num_thread;
+    // int start_idx = threadIdx.x * num_element_to_copy_per_thread;
+    // for (int i = 0; i < num_element_to_copy_per_thread ; i++) {
+    //   shared_array[start_idx + i] = *(a_ptr + iy * kTileM * K + start_idx + i);
+    // }
+
+    // Option 2: Use tiledCopy
+    // **重要** 这里我们希望 TiledCopy 每次 copy kTileM * kTileK 大小的块, 循环 K / kTileK 次
+    // SM80_CP_ASYNC_CACHEGLOBAL 的介绍: https://zhuanlan.zhihu.com/p/1904236341904009066
+    // Example Code: https://github.com/reed-lau/cute-gemm/blob/51dc19e783cd4b722177a6b5637a03db2d2851a9/gemm-multi-stage.cu#L94
+    constexpr int kNThreads = size(TiledMMA{}); // In typical case, we use 128 threads
+    constexpr int kNWarps = kNThreads / 32; // In typical case, we use 4 warp
+    using Gmem_copy_struct = cute::SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>;  // 一个 Atom 要copy的 bits 就是这里给的 cute::uint128_t
+    // 因为 我们定义的 copy ATOM 是 cute::SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>
+    // kGmemElemsPerLoad 表示 一个 ATOM copy 8 个 fp16 = 128 个bit
+    static constexpr int kGmemElemsPerLoad = sizeof(cute::uint128_t) / sizeof(cute::half_t);
+    
+    // TiledCopy 每次 copy kTileM * kTileK 大小的块
+    // 一个 ATOM 沿着 K 维度 copy 8个元素，所以需要4个线程沿着 K 维度 完成 copy
+    static constexpr int kNThreadsK = kTileK / kGmemElemsPerLoad;
+    // 一共 128 线程，128 // kNThreadsK = kNThreadsM = 32
+    // 需要 32 个线程 沿着 M 维度完成Copy
+    static constexpr int kNThreadsM = kNThreads / kNThreadsK;
+    using GmemLayoutAtom = cute::Layout<cute::Shape<cute::Int<kNThreadsM>, cute::Int<kNThreadsK>>, cute::Stride<cute::Int<kNThreadsK>, cute::_1>>;  // (kTileM, 4)
+
+    // Thr layout: ThrLayout 表示如何从执行线程的层面对 单个Copy_Atom进行扩展，所有值相乘 等于 线程的数量
+    // Val layout: 这里的 val layout 必须是8的整数倍，8 从哪里来的: 因为 cute::SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>，一次copy 8 个 half
+    //    如果是8的倍数，应该就表示了这个copy atom 要循环 copy 多次
+    using GmemTiledCopyQKV = decltype(
+        make_tiled_copy(cute::Copy_Atom<Gmem_copy_struct, cute::half_t>{},
+                        GmemLayoutAtom{},  // Thr Layout
+                        cute::Layout<cute::Shape<cute::_1, cute::Int<kGmemElemsPerLoad>>>{})); // Val layout
+    GmemTiledCopyQKV gmem_tiled_copy_QKV;
+    auto gmem_thr_copy_QKV = gmem_tiled_copy_QKV.get_thread_slice(threadIdx.x);
+
+
+    cute::Tensor mgA = cute::make_tensor(cute::make_gmem_ptr(a_ptr), cute::make_shape(M, K), cute::make_stride(K, cute::Int<1>{}));
+    cute::Tensor gA = cute::local_tile(mgA, cute::make_tile(cute::Int<kTileM>{}, cute::Int<kTileK>{}), cute::make_coord(iy, cute::_)); // gA(kTileM, kTileK, num_tile_k)
+    cute::Tensor msA = cute::make_tensor(cute::make_smem_ptr(shared_array), cute::make_shape(kTileM, K), cute::make_stride(K, cute::Int<1>{}));
+    cute::Tensor sA_new = cute::local_tile(msA, cute::make_tile(cute::Int<kTileM>{}, cute::Int<kTileK>{}), cute::make_coord(0, cute::_));
+
+    // CPY_M 表示 
+    // CPY_K 表示 
+    // k 表示 整个 K 沿着 kTileK 需要循环多少次 来copy
+    cute::Tensor tAgA_new = gmem_thr_copy_QKV.partition_S(gA);  // (CPY, CPY_M, CPY_K, k)
+    cute::Tensor tAsA_new = gmem_thr_copy_QKV.partition_D(sA_new); // (CPY, CPY_M, CPY_K, k)
+
+
+    if (cute::thread0()) {
+      printf("\n");
+      print(tAgA_new);  // gmem_ptr[16b](0x7f6923208000) o ((_8,_1),_1,_1,4):((_1,_0),_0,_0,_32)
+      printf("\n");
+      print(tAsA_new);  // smem_ptr[16b](0x7f6945000000) o ((_8,_1),_1,_1,4):((_1,_0),_0,_0,_32)
+      printf("\n");
     }
+
+    #pragma unroll 1
+    for(int itile = 0; itile < cute::size<2>(gA); ++itile) {
+      // 这里 我们每次 循环是 拷贝 kTileM * kTileK 大小的块
+      // 一共循环 K / kTileK 次
+      cute::copy(gmem_tiled_copy_QKV, tAgA_new(cute::_, cute::_, cute::_, itile), tAsA_new(cute::_, cute::_, cute::_, itile));
+    }
+    cute::cp_async_fence();
+    // 这里我们完全阻塞了，等待所有的数据从 HBM 向 SLM copy 完成
+    // 优化的写法，可以等一块 itile copy 完了，再去async copy 下一块，同时进行这一块的计算
+    // 对于 cp_async_fence 以及 _cp_async_wait的解释，参考: https://zhuanlan.zhihu.com/p/1904236341904009066
+    cute::cp_async_wait<0>();
+    __syncthreads();
+
 
     // 构造CUTE Tensor, size 是总的Tensor       
     cute::Tensor A = cute::make_tensor(cute::make_smem_ptr(shared_array), cute::make_shape(kTileM, K), cute::make_stride(K, cute::Int<1>{}));
@@ -221,18 +286,36 @@ __global__ void _extended_gemm_block_cutlass_naive_kernel(
     // set to zero
     cute::clear(tCrC);
 
+    // if (cute::thread0()) {
+    //   printf("\n");
+    //   print(tAsA);
+    //   printf("\n");
+    //   print(tArA);
+    //   printf("\n");
+    // }
 
     // TODO<leslie> using tiled copy from smem to register
-    // using SmemCopyAtom = cute::Copy_Atom<cute::SM75_U32x4_LDSM_N, cutlass::half_t>;
-    // auto smem_tiled_copy_A = make_tiled_copy_A(SmemCopyAtom{}, tiled_mma);
-    // auto smem_thr_copy_A = smem_tiled_copy_A.get_thread_slice(threadIdx.x);
+    using SmemCopyAtom = cute::Copy_Atom<cute::SM75_U32x4_LDSM_N, cute::half_t>;
+    auto smem_tiled_copy_A = make_tiled_copy_A(SmemCopyAtom{}, tiled_mma);
+    auto smem_thr_copy_A = smem_tiled_copy_A.get_thread_slice(threadIdx.x);
+
+    cute::Tensor tArA_copy_view = smem_thr_copy_A.retile_D(tArA);
+
+    auto tAsA_copy = smem_thr_copy_A.partition_S(sA);
+
+    // if (cute::thread0()) {
+    //   printf("\n");
+    //   print(tAsA_copy);
+    //   printf("\n");
+    //   print(tArA_copy_view);
+    //   printf("\n");
+    // }
 
     int num_tile_k = cute::size<2>(sA);
     #pragma unroll 1
     for(int itile = 0; itile < num_tile_k; ++itile) {
-      cute::copy(tAsA(cute::_, cute::_, cute::_, itile), tArA);
+      cute::copy(smem_tiled_copy_A, tAsA_copy(cute::_, cute::_, cute::_, itile), tArA_copy_view);
       cute::copy(tBgB(cute::_, cute::_, cute::_, itile), tBrB);
-
       cute::gemm(tiled_mma, tCrC, tArA, tBrB, tCrC);
     }
 
@@ -321,7 +404,7 @@ void _extended_gemm_kernel_low_level_api(
   } else {
     block = dim3(size(MMA_fp32{}));
     
-    bool use_slm = false;
+    bool use_slm = true;
     if (!use_slm) {
       _extended_gemm_block_cutlass_naive_kernel<T, T2, kTileM, kTileN, kTileK, MMA_fp32, use_relu, false><<<grid, block>>>(
         reinterpret_cast<T*>(a_ptr), reinterpret_cast<T*>(b_ptr), (T2*)out_ptr, M, N, K, lda, ldb, ldc

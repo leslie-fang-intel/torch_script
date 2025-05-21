@@ -72,9 +72,10 @@ def test_extended_gemm_cute():
 
 def test_extended_gemm_cute_float():
     for epilogue in ["none", "relu"]:
-        shape = (64, 64)
-        a = torch.randn(*shape).to("cuda").to(torch.float16)
-        b = torch.randn(*shape).to("cuda").to(torch.float16)
+        a_shape = (64, 128)
+        b_shape = (128, 64)
+        a = torch.randn(*a_shape).to("cuda").to(torch.float16)
+        b = torch.randn(*b_shape).to("cuda").to(torch.float16)
         ref_res = torch.mm(a, b).to(torch.float32)
         if epilogue == "relu":
             ref_res = torch.nn.functional.relu(ref_res)
