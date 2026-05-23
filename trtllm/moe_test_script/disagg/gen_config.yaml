@@ -1,0 +1,12 @@
+# Extra LLM config for generation (decode) server in disaggregated serving.
+# Passed via `trtllm-serve --config gen_config.yaml`.
+
+cache_transceiver_config:
+  backend: UCX
+  max_tokens_in_buffer: 4608
+
+# To enable EPLB on the generation pool, uncomment and configure:
+# moe_config:
+#   load_balancer:
+#     num_slots: 80               # must be divisible by ep_size (here ep=2 → 80%2==0)
+#     layer_updates_per_iter: 2

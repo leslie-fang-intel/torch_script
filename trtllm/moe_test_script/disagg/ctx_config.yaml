@@ -1,0 +1,19 @@
+# Extra LLM config for context (prefill) server in disaggregated serving.
+# Passed via `trtllm-serve --config ctx_config.yaml`.
+
+# Context server overlap scheduler is not yet supported in disaggregated
+# architectures — must be disabled.
+disable_overlap_scheduler: true
+
+cache_transceiver_config:
+  # UCX is preinstalled in NVIDIA GPU containers; more reliable than NIXL
+  # for first-time setup. Switch to DEFAULT (NIXL/UCX) or NIXL after verified.
+  backend: UCX
+  # Set ≥ max ISL for best performance.
+  max_tokens_in_buffer: 4608
+
+# To enable EPLB on the context pool, uncomment and configure:
+# moe_config:
+#   load_balancer:
+#     num_slots: 80               # must be divisible by ep_size (here ep=2 → 80%2==0)
+#     layer_updates_per_iter: 2   # 0 = offline (also set initial_global_assignments)

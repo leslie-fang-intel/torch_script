@@ -1,0 +1,21 @@
+# Disaggregated router/proxy config. Passed via:
+#   trtllm-serve disaggregated -c disagg_server.yaml
+#
+# This file describes the URLs of the ctx/gen workers and the public endpoint
+# (port 8000) that clients talk to. The router forwards prefill requests to
+# context_servers and generation requests to generation_servers; KV cache is
+# transferred between them via the cache_transceiver backend (UCX here).
+
+hostname: localhost
+port: 8000
+backend: pytorch
+
+context_servers:
+  num_instances: 1
+  urls:
+    - "localhost:8001"
+
+generation_servers:
+  num_instances: 1
+  urls:
+    - "localhost:8003"

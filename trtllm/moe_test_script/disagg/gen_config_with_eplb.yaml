@@ -1,0 +1,16 @@
+# Generation worker config with offline EPLB enabled.
+# Used in stage 3 of the offline EPLB workflow on gen pool only:
+#   GEN_CONFIG=$(pwd)/moe_test_script/disagg/gen_config_with_eplb.yaml \
+#       bash moe_test_script/disagg/launch.sh
+#
+# Requires ./moe_load_balancer_gen.yaml to exist at TRT-LLM root
+# (produced by stage 2: generate_eplb_config.py).
+
+cache_transceiver_config:
+  backend: UCX
+  max_tokens_in_buffer: 4608
+
+moe_config:
+  # Path is relative to TRT-LLM root (CWD where launch.sh is invoked).
+  # For safety, use absolute path if launching from a different CWD.
+  load_balancer: ./moe_load_balancer_gen.yaml
